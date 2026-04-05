@@ -44,6 +44,30 @@ export const defaultTheme: Theme = {
     eventGlowRadius: 12,
     eventTrailOpacity: 0.3,
 
+    // Category-specific node colors
+    nodeCategories: {
+        source: { fill: '#1a3a2e', stroke: '#0f6040', titleBar: '#1a4a3e' },
+        transform: { fill: '#2a1a3e', stroke: '#5f3460', titleBar: '#3a1a4e' },
+        output: { fill: '#3e2a1a', stroke: '#b05020', titleBar: '#4e3a1a' },
+        delay: { fill: '#3e3a1a', stroke: '#a09020', titleBar: '#4e4a1a' },
+    },
+
+    // Active node border
+    nodeActiveBorderColor: '#e94560',
+    nodeActiveBorderDash: [8, 4],
+    nodeActiveBorderWidth: 2.5,
+
+    // Active connection
+    connectionActiveDash: [10, 6],
+    connectionActiveDashSpeed: 80,
+    connectionActiveStroke: '#e94560',
+    connectionActiveGlowColor: 'rgba(233, 69, 96, 0.4)',
+    connectionActiveGlowRadius: 8,
+
+    // Node config subtitle
+    nodeSubtitleFont: '10px sans-serif',
+    nodeSubtitleColor: '#999999',
+
     // Selection box
     selectionFill: 'rgba(233, 69, 96, 0.1)',
     selectionStroke: 'rgba(233, 69, 96, 0.5)',

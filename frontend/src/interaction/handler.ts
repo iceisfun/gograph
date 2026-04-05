@@ -6,27 +6,39 @@ import { handleWheel, startPan, updatePan } from './camera.js';
 import { startDrag, updateDrag, endDrag } from './drag.js';
 import { startConnect, updateConnect, endConnect } from './connect.js';
 import { handleClick, startBoxSelect, updateBoxSelect, endBoxSelect } from './select.js';
+import { ContextMenu } from './context-menu.js';
+import { ConfigModal } from './config-modal.js';
 
 export class InteractionHandler {
     private canvas: HTMLCanvasElement;
     private store: AppStore;
     private api: ApiClient;
+    private contextMenu: ContextMenu;
+    private configModal: ConfigModal;
     private boundMouseDown: (e: MouseEvent) => void;
     private boundMouseMove: (e: MouseEvent) => void;
     private boundMouseUp: (e: MouseEvent) => void;
     private boundWheel: (e: WheelEvent) => void;
     private boundKeyDown: (e: KeyboardEvent) => void;
+    private boundContextMenu: (e: MouseEvent) => void;
+    private boundDblClick: (e: MouseEvent) => void;
 
     constructor(canvas: HTMLCanvasElement, store: AppStore, api: ApiClient) {
         this.canvas = canvas;
         this.store = store;
         this.api = api;
 
+        const container = canvas.parentElement || document.body;
+        this.contextMenu = new ContextMenu(container);
+        this.configModal = new ConfigModal(container);
+
         this.boundMouseDown = this.onMouseDown.bind(this);
         this.boundMouseMove = this.onMouseMove.bind(this);
         this.boundMouseUp = this.onMouseUp.bind(this);
         this.boundWheel = this.onWheel.bind(this);
         this.boundKeyDown = this.onKeyDown.bind(this);
+        this.boundContextMenu = this.onContextMenu.bind(this);
+        this.boundDblClick = this.onDblClick.bind(this);
     }
 
     start(): void {
@@ -34,6 +46,8 @@ export class InteractionHandler {
         this.canvas.addEventListener('mousemove', this.boundMouseMove);
         this.canvas.addEventListener('mouseup', this.boundMouseUp);
         this.canvas.addEventListener('wheel', this.boundWheel, { passive: false });
+        this.canvas.addEventListener('contextmenu', this.boundContextMenu);
+        this.canvas.addEventListener('dblclick', this.boundDblClick);
         window.addEventListener('keydown', this.boundKeyDown);
     }
 
@@ -42,6 +56,8 @@ export class InteractionHandler {
         this.canvas.removeEventListener('mousemove', this.boundMouseMove);
         this.canvas.removeEventListener('mouseup', this.boundMouseUp);
         this.canvas.removeEventListener('wheel', this.boundWheel);
+        this.canvas.removeEventListener('contextmenu', this.boundContextMenu);
+        this.canvas.removeEventListener('dblclick', this.boundDblClick);
         window.removeEventListener('keydown', this.boundKeyDown);
     }
 
@@ -241,6 +257,72 @@ export class InteractionHandler {
         if (e.key === 'Escape') {
             this.store.interaction.clearSelection();
             this.store.interaction.dragState = null;
+        }
+    }
+
+    private onContextMenu(e: MouseEvent): void {
+        e.preventDefault();
+        if (this.store.interaction.mode === 'view') return;
+
+        const graph = this.store.graph.current;
+        if (!graph) return;
+
+        const screenPos = this.getScreenPos(e);
+        const worldPos = this.store.camera.screenToWorld(screenPos);
+        const nodeTypes = this.store.graph.nodeTypes;
+
+        if (nodeTypes.length === 0) return;
+
+        const items = nodeTypes.map(nt => ({
+            label: nt.label,
+            category: nt.category || 'other',
+            onClick: () => {
+                const id = typeof crypto !== 'undefined' && crypto.randomUUID
+                    ? crypto.randomUUID()
+                    : `node-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+                const node = {
+                    id,
+                    type: nt.name,
+                    label: nt.label,
+                    position: { x: worldPos.x, y: worldPos.y },
+                };
+
+                graph.nodes[id] = node;
+
+                void this.api.addNode(graph.id, node).catch(err => {
+                    console.error('Failed to persist new node:', err);
+                });
+            },
+        }));
+
+        this.contextMenu.show(screenPos.x, screenPos.y, items);
+    }
+
+    private onDblClick(e: MouseEvent): void {
+        const screenPos = this.getScreenPos(e);
+        const worldPos = this.store.camera.screenToWorld(screenPos);
+
+        const nodeHit = hitTestNode(worldPos, this.store);
+        if (!nodeHit) return;
+
+        const graph = this.store.graph.current;
+        if (!graph) return;
+
+        const node = graph.nodes[nodeHit];
+        if (!node) return;
+
+        const nodeType = this.store.graph.getNodeType(node.type);
+        if (!nodeType) return;
+
+        // Show config modal for nodes with config or delay-category nodes
+        if (node.config || nodeType.category === 'delay') {
+            this.configModal.show(node, nodeType, (config) => {
+                node.config = config;
+                void this.api.updateGraph(graph.id, graph).catch(err => {
+                    console.error('Failed to persist config update:', err);
+                });
+            });
         }
     }
 }

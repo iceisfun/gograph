@@ -33,7 +33,14 @@ async function main() {
             onGraphUpdate: (p) => { store.graph.setGraph(p.graph); },
             onNodeUpdate: (p) => { store.graph.updateNode(p.node); },
             onConnectionUpdate: (p) => { store.graph.updateConnection(p.connection); },
-            onEventStart: (p) => { store.animation.startEvent(p); },
+            onEventStart: (p) => {
+                store.animation.startEvent(p);
+                // Activate the source node border animation
+                const conn = store.graph.getConnection(p.connectionID);
+                if (conn) {
+                    store.animation.activateNode(conn.fromNode, p.duration);
+                }
+            },
             onEventUpdate: (p) => { store.animation.updateEvent(p); },
             onEventEnd: (p) => { store.animation.endEvent(p.eventID); },
             onEventCancel: (p) => { store.animation.cancelEvent(p.eventID, p.immediate); },

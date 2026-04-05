@@ -39,4 +39,5 @@ export interface NodeType {
     label: string;
     slots: Slot[];
     scriptName?: string;
+    category?: string;
 }

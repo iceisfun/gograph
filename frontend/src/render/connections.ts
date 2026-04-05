@@ -6,6 +6,7 @@ export function drawConnections(
     ctx: CanvasRenderingContext2D,
     store: AppStore,
     theme: Theme,
+    now: number = 0,
 ): void {
     const graph = store.graph.current;
     if (!graph) return;
@@ -34,6 +35,23 @@ export function drawConnections(
         }
 
         ctx.stroke();
+
+        // Active connection dashing animation
+        const activeConn = store.animation.activeConnections.get(conn.id);
+        if (activeConn) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, to.x, to.y);
+            ctx.setLineDash(theme.connectionActiveDash);
+            ctx.lineDashOffset = -((now - activeConn.startTime) / 1000) * theme.connectionActiveDashSpeed;
+            ctx.strokeStyle = theme.connectionActiveStroke;
+            ctx.lineWidth = theme.connectionStrokeWidth + 1;
+            ctx.shadowBlur = theme.connectionActiveGlowRadius;
+            ctx.shadowColor = theme.connectionActiveGlowColor;
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
     // Draw in-progress connection preview

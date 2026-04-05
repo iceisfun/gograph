@@ -42,6 +42,29 @@ export interface Theme {
     eventGlowRadius: number;
     eventTrailOpacity: number;
 
+    // Category-specific node colors
+    nodeCategories: Record<string, {
+        fill: string;
+        stroke: string;
+        titleBar: string;
+    }>;
+
+    // Active node border (emitting animation)
+    nodeActiveBorderColor: string;
+    nodeActiveBorderDash: number[];
+    nodeActiveBorderWidth: number;
+
+    // Active connection (event traversing)
+    connectionActiveDash: number[];
+    connectionActiveDashSpeed: number;
+    connectionActiveStroke: string;
+    connectionActiveGlowColor: string;
+    connectionActiveGlowRadius: number;
+
+    // Node config subtitle
+    nodeSubtitleFont: string;
+    nodeSubtitleColor: string;
+
     // Selection box
     selectionFill: string;
     selectionStroke: string;

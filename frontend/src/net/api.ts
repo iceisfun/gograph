@@ -1,4 +1,4 @@
-import type { Graph, NodeType } from '../core/types.js';
+import type { Graph, Node, NodeType } from '../core/types.js';
 
 export interface AppConfig {
     apiBase: string;
@@ -55,6 +55,13 @@ export class ApiClient {
     async deleteGraph(id: string): Promise<void> {
         return this.request<void>(`/graphs/${id}`, {
             method: 'DELETE',
+        });
+    }
+
+    async addNode(graphId: string, node: Node): Promise<Node> {
+        return this.request<Node>(`/graphs/${graphId}/nodes`, {
+            method: 'POST',
+            body: JSON.stringify(node),
         });
     }
 

@@ -60,6 +60,7 @@ export class Renderer {
         const ctx = this.ctx;
         const store = this.store;
         const theme = this.theme;
+        const now = performance.now();
 
         // 1. Resize canvas to match container (handle DPR)
         this.handleResize();
@@ -85,13 +86,13 @@ export class Renderer {
         drawGrid(ctx, store.camera, logicalWidth, logicalHeight, theme);
 
         // 6. Draw connections
-        drawConnections(ctx, store, theme);
+        drawConnections(ctx, store, theme, now);
 
         // 7. Draw connection events (animated dots)
         drawConnectionEvents(ctx, store, theme);
 
         // 8. Draw nodes
-        drawNodes(ctx, store, theme);
+        drawNodes(ctx, store, theme, now);
 
         // 9. Draw overlays (selection box, etc.)
         drawOverlays(ctx, store, theme);
@@ -100,6 +101,6 @@ export class Renderer {
         ctx.restore();
 
         // 11. Update animation state
-        store.animation.tick(performance.now());
+        store.animation.tick(now);
     }
 }

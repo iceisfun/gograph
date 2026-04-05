@@ -51,6 +51,7 @@ export function drawNodes(
     ctx: CanvasRenderingContext2D,
     store: AppStore,
     theme: Theme,
+    now: number = 0,
 ): void {
     const graph = store.graph.current;
     if (!graph) return;
@@ -61,9 +62,16 @@ export function drawNodes(
         const isSelected = store.interaction.selectedNodes.has(node.id);
         const isHovered = store.interaction.hoveredNode === node.id;
 
+        // Resolve category colors
+        const category = nodeType?.category;
+        const catColors = category ? theme.nodeCategories[category] : undefined;
+        const nodeFill = catColors?.fill ?? theme.nodeFill;
+        const nodeStroke = catColors?.stroke ?? theme.nodeStroke;
+        const nodeTitleBar = catColors?.titleBar ?? theme.nodeTitleBar;
+
         // Draw node body
         drawRoundedRect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, theme.nodeCornerRadius);
-        ctx.fillStyle = theme.nodeFill;
+        ctx.fillStyle = nodeFill;
         ctx.fill();
 
         // Draw stroke
@@ -74,17 +82,30 @@ export function drawNodes(
             ctx.strokeStyle = theme.nodeHoverStroke;
             ctx.lineWidth = theme.nodeStrokeWidth;
         } else {
-            ctx.strokeStyle = theme.nodeStroke;
+            ctx.strokeStyle = nodeStroke;
             ctx.lineWidth = theme.nodeStrokeWidth;
         }
         ctx.stroke();
+
+        // Active node border animation
+        const activeState = store.animation.activeNodes.get(node.id);
+        if (activeState) {
+            ctx.save();
+            ctx.setLineDash(theme.nodeActiveBorderDash);
+            ctx.lineDashOffset = -((now - activeState.startTime) / 1000) * 60;
+            ctx.strokeStyle = theme.nodeActiveBorderColor;
+            ctx.lineWidth = theme.nodeActiveBorderWidth;
+            drawRoundedRect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, theme.nodeCornerRadius);
+            ctx.stroke();
+            ctx.restore();
+        }
 
         // Draw title bar (clip to top rounded corners)
         ctx.save();
         drawRoundedRect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, theme.nodeCornerRadius);
         ctx.clip();
 
-        ctx.fillStyle = theme.nodeTitleBar;
+        ctx.fillStyle = nodeTitleBar;
         ctx.fillRect(bounds.x, bounds.y, bounds.width, NODE_TITLE_HEIGHT);
 
         // Draw title separator line
@@ -104,6 +125,19 @@ export function drawNodes(
         ctx.textBaseline = 'middle';
         const label = node.label || (nodeType ? nodeType.label : node.type);
         ctx.fillText(label, bounds.x + bounds.width / 2, bounds.y + NODE_TITLE_HEIGHT / 2);
+
+        // Draw config subtitle (e.g., duration for delay nodes)
+        if (node.config?.duration) {
+            ctx.fillStyle = theme.nodeSubtitleColor;
+            ctx.font = theme.nodeSubtitleFont;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(
+                `\u23F1 ${node.config.duration}ms`,
+                bounds.x + bounds.width / 2,
+                bounds.y + NODE_TITLE_HEIGHT + 4,
+            );
+        }
 
         // Draw slots
         if (nodeType) {
@@ -126,7 +160,7 @@ export function drawNodes(
                     ctx.fillStyle = theme.slotInputColor;
                     ctx.fill();
                 } else {
-                    ctx.fillStyle = theme.nodeFill;
+                    ctx.fillStyle = nodeFill;
                     ctx.fill();
                     ctx.strokeStyle = theme.slotInputColor;
                     ctx.lineWidth = theme.slotStrokeWidth;
@@ -165,7 +199,7 @@ export function drawNodes(
                     ctx.fillStyle = theme.slotOutputColor;
                     ctx.fill();
                 } else {
-                    ctx.fillStyle = theme.nodeFill;
+                    ctx.fillStyle = nodeFill;
                     ctx.fill();
                     ctx.strokeStyle = theme.slotOutputColor;
                     ctx.lineWidth = theme.slotStrokeWidth;

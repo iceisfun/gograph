@@ -13,6 +13,18 @@ export interface ActiveEvent {
 
 export class AnimationState {
     activeEvents: Map<string, ActiveEvent> = new Map();
+    activeNodes: Map<string, { startTime: number; endTime: number }> = new Map();
+    activeConnections: Map<string, { startTime: number; endTime: number; color: string }> = new Map();
+
+    activateNode(nodeId: string, durationMs: number): void {
+        const now = performance.now();
+        this.activeNodes.set(nodeId, { startTime: now, endTime: now + durationMs });
+    }
+
+    activateConnection(connectionId: string, durationMs: number, color: string): void {
+        const now = performance.now();
+        this.activeConnections.set(connectionId, { startTime: now, endTime: now + durationMs, color });
+    }
 
     startEvent(payload: EventStartPayload): void {
         this.activeEvents.set(payload.eventID, {
@@ -24,6 +36,7 @@ export class AnimationState {
             intensity: 1,
             progress: 0,
         });
+        this.activateConnection(payload.connectionID, payload.duration || DEFAULT_EVENT_DURATION, payload.color || '');
     }
 
     updateEvent(payload: EventUpdatePayload): void {
@@ -68,6 +81,14 @@ export class AnimationState {
 
         for (const id of toRemove) {
             this.activeEvents.delete(id);
+        }
+
+        // Clean up expired active nodes
+        for (const [id, state] of this.activeNodes) {
+            if (now >= state.endTime) this.activeNodes.delete(id);
+        }
+        for (const [id, state] of this.activeConnections) {
+            if (now >= state.endTime) this.activeConnections.delete(id);
         }
     }
 }
