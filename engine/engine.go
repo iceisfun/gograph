@@ -146,6 +146,12 @@ func (e *Engine) Execute(ctx context.Context) error {
 		// Gather inputs from upstream connections.
 		inputs := e.gatherInputs(nodeID, outputs)
 
+		// Skip nodes that expect inputs but have none connected.
+		// These are disconnected sink/transform nodes that shouldn't fire.
+		if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
+			continue
+		}
+
 		// Execute the node.
 		config := node.Config
 		if config == nil {
