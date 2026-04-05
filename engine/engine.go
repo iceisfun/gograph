@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iceisfun/gograph/graph"
+	"github.com/iceisfun/gograph/store"
 )
 
 // Executor runs a node's logic with the given inputs and returns outputs.
@@ -26,6 +27,8 @@ type Executor interface {
 type Engine struct {
 	mu          sync.RWMutex
 	graph       *graph.Graph
+	graphID     string
+	store       store.GraphStore
 	registry    *graph.Registry
 	executor    Executor
 	subscribers []*Subscriber
@@ -46,6 +49,16 @@ func WithRegistry(r *graph.Registry) EngineOption {
 func WithExecutor(exec Executor) EngineOption {
 	return func(e *Engine) {
 		e.executor = exec
+	}
+}
+
+// WithStore sets the graph store. When set, the engine reloads the graph
+// from the store before each execution to pick up changes made through
+// the REST API (e.g. node/connection edits from the frontend).
+func WithStore(s store.GraphStore, graphID string) EngineOption {
+	return func(e *Engine) {
+		e.store = s
+		e.graphID = graphID
 	}
 }
 
@@ -97,6 +110,15 @@ func (e *Engine) emit(evt Event) {
 // Returns an error if the graph has cycles, a node type is missing, or
 // execution fails.
 func (e *Engine) Execute(ctx context.Context) error {
+	// Reload graph from store to pick up frontend edits.
+	if e.store != nil {
+		g, err := e.store.Load(ctx, e.graphID)
+		if err != nil {
+			return fmt.Errorf("load graph: %w", err)
+		}
+		e.graph = g
+	}
+
 	order, err := Order(e.graph)
 	if err != nil {
 		return err

@@ -70,6 +70,7 @@ func main() {
 		engine.WithRegistry(reg),
 		engine.WithExecutor(luaExec),
 		engine.WithEventDuration(1500),
+		engine.WithStore(st, g.ID),
 	)
 
 	// Configure the server.

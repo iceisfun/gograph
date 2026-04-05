@@ -141,6 +141,7 @@ func main() {
 		engine.WithRegistry(reg),
 		engine.WithExecutor(luaExec),
 		engine.WithEventDuration(1000),
+		engine.WithStore(st, g.ID),
 	)
 
 	// Server.
