@@ -12,6 +12,7 @@ const (
 	TypeEventCancel      = "event.cancel"
 	TypeGraphUpdate      = "graph.update"
 	TypeNodeUpdate       = "node.update"
+	TypeNodeActive       = "node.active"
 	TypeConnectionUpdate = "connection.update"
 )
 
@@ -77,6 +78,14 @@ type GraphUpdatePayload struct {
 type NodeUpdatePayload struct {
 	Envelope
 	Node *Node `json:"node"`
+}
+
+// NodeActivePayload is sent when a node becomes active (e.g. a delay node
+// starts holding). The frontend renders a glow effect for the duration.
+type NodeActivePayload struct {
+	Envelope
+	NodeID   string `json:"nodeID"`
+	Duration int    `json:"duration"`
 }
 
 // ConnectionUpdatePayload is sent when a single connection is added or modified.

@@ -5,6 +5,7 @@ import type {
     EventCancelPayload,
     GraphUpdatePayload,
     NodeUpdatePayload,
+    NodeActivePayload,
     ConnectionUpdatePayload,
 } from '../core/protocol.js';
 import {
@@ -14,6 +15,7 @@ import {
     EVENT_CANCEL,
     GRAPH_UPDATE,
     NODE_UPDATE,
+    NODE_ACTIVE,
     CONNECTION_UPDATE,
 } from '../core/protocol.js';
 
@@ -24,6 +26,7 @@ export interface SSEHandlers {
     onEventCancel(payload: EventCancelPayload): void;
     onGraphUpdate(payload: GraphUpdatePayload): void;
     onNodeUpdate(payload: NodeUpdatePayload): void;
+    onNodeActive?(payload: NodeActivePayload): void;
     onConnectionUpdate(payload: ConnectionUpdatePayload): void;
     onConnect?(): void;
     onDisconnect?(): void;
@@ -107,6 +110,10 @@ export class SSEClient {
 
         this.eventSource.addEventListener(NODE_UPDATE, (e) => {
             this.handlers.onNodeUpdate(JSON.parse((e as MessageEvent).data) as NodeUpdatePayload);
+        });
+
+        this.eventSource.addEventListener(NODE_ACTIVE, (e) => {
+            this.handlers.onNodeActive?.(JSON.parse((e as MessageEvent).data) as NodeActivePayload);
         });
 
         this.eventSource.addEventListener(CONNECTION_UPDATE, (e) => {

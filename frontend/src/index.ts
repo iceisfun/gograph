@@ -41,6 +41,9 @@ async function main() {
                     store.animation.shakeNode(conn.fromNode);
                 }
             },
+            onNodeActive: (p) => {
+                store.animation.glowNode(p.nodeID, p.duration);
+            },
             onEventUpdate: (p) => { store.animation.updateEvent(p); },
             onEventEnd: (p) => { store.animation.endEvent(p.eventID); },
             onEventCancel: (p) => { store.animation.cancelEvent(p.eventID, p.immediate); },

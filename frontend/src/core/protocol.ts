@@ -7,6 +7,7 @@ export const EVENT_END = 'event.end';
 export const EVENT_CANCEL = 'event.cancel';
 export const GRAPH_UPDATE = 'graph.update';
 export const NODE_UPDATE = 'node.update';
+export const NODE_ACTIVE = 'node.active';
 export const CONNECTION_UPDATE = 'connection.update';
 
 // Base envelope
@@ -45,6 +46,11 @@ export interface GraphUpdatePayload extends Envelope {
 
 export interface NodeUpdatePayload extends Envelope {
     node: Node;
+}
+
+export interface NodeActivePayload extends Envelope {
+    nodeID: string;
+    duration: number;
 }
 
 export interface ConnectionUpdatePayload extends Envelope {

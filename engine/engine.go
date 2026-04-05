@@ -206,6 +206,15 @@ func (e *Engine) Execute(ctx context.Context) error {
 		if d, ok := config["duration"]; ok {
 			if ms, parseErr := strconv.Atoi(d); parseErr == nil && ms > 0 {
 				e.nodeLogger.NodeHolding(nodeID, ms)
+				// Notify frontend so the node glows during the hold.
+				e.emit(Event{
+					Type: graph.TypeNodeActive,
+					Payload: graph.NodeActivePayload{
+						Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
+						NodeID:   nodeID,
+						Duration: ms,
+					},
+				})
 				select {
 				case <-ctx.Done():
 					e.cancelAll()

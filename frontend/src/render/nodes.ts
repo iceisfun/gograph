@@ -84,6 +84,20 @@ export function drawNodes(
             }
         }
 
+        // Glow effect for nodes holding/buffering (e.g. delay nodes)
+        const glowState = store.animation.glowingNodes.get(node.id);
+        if (glowState) {
+            ctx.save();
+            const elapsed = now - glowState.startTime;
+            const pulse = 0.6 + 0.4 * Math.sin(elapsed * 0.004);
+            ctx.shadowBlur = theme.nodeGlowRadius * pulse;
+            ctx.shadowColor = theme.nodeGlowColor;
+            drawRoundedRect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, theme.nodeCornerRadius);
+            ctx.fillStyle = nodeFill;
+            ctx.fill();
+            ctx.restore();
+        }
+
         // Draw node body
         drawRoundedRect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, theme.nodeCornerRadius);
         ctx.fillStyle = nodeFill;

@@ -75,6 +75,10 @@ export interface Theme {
     nodeShakeDuration: number;
     nodeShakeIntensity: number;
 
+    // Node glow (delay/buffer holding)
+    nodeGlowColor: string;
+    nodeGlowRadius: number;
+
     // Compatible slot glow (during connection drag)
     slotCompatibleGlow: string;
     slotCompatibleGlowRadius: number;
