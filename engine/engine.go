@@ -584,11 +584,15 @@ func (e *Engine) emitNodeOutputEvents(g *graph.Graph, nodeID string, outputs map
 				})
 			}(eventID, c.ID, c.ToNode, duration)
 		} else {
-			// Instant: emit steady state for this wire.
+			// Instant: emit steady state for this wire (with change detection).
 			val := ""
 			if v, ok := outputs[c.FromSlot]; ok {
 				val = fmt.Sprintf("%v", v)
 			}
+			if prev, loaded := e.lastWireState.Load(c.ID); loaded && prev.(string) == val {
+				continue
+			}
+			e.lastWireState.Store(c.ID, val)
 			active := val != "" && val != "0" && val != "false" && val != "off" && val != "<nil>"
 			e.eventLogger.EventEmitted("", c.ID, nodeID, c.ToNode, 0)
 			e.emit(Event{
