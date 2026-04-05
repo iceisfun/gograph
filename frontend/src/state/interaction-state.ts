@@ -25,7 +25,13 @@ export interface DragSelectState {
     currentPos: Vec2;
 }
 
-export type DragState = DragNodeState | DragConnectionState | DragPanState | DragSelectState;
+export interface DragGroupState {
+    type: 'group';
+    startPos: Vec2;
+    nodeOffsets: Map<string, Vec2>;
+}
+
+export type DragState = DragNodeState | DragConnectionState | DragPanState | DragSelectState | DragGroupState;
 
 export interface HoveredSlot {
     nodeId: string;

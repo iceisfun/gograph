@@ -1,4 +1,5 @@
-import { vec2 } from '../core/geometry.js';
+import { vec2, sub } from '../core/geometry.js';
+import type { Vec2 } from '../core/geometry.js';
 import type { AppStore } from '../state/store.js';
 import type { ApiClient } from '../net/api.js';
 import { hitTestNode, hitTestSlot, hitTestConnection } from './hit-test.js';
@@ -6,8 +7,10 @@ import { handleWheel, startPan, updatePan } from './camera.js';
 import { startDrag, updateDrag, endDrag } from './drag.js';
 import { startConnect, updateConnect, endConnect } from './connect.js';
 import { handleClick, startBoxSelect, updateBoxSelect, endBoxSelect } from './select.js';
+import { hitTestGroupHandle } from '../render/overlays.js';
 import { ContextMenu } from './context-menu.js';
 import { ConfigModal } from './config-modal.js';
+import type { DragGroupState } from '../state/interaction-state.js';
 
 export class InteractionHandler {
     private canvas: HTMLCanvasElement;
@@ -83,6 +86,22 @@ export class InteractionHandler {
         if (interaction.mode === 'view') {
             interaction.dragState = startPan(screenPos);
             return;
+        }
+
+        // Check group handle hit (highest priority when multi-selected)
+        if (hitTestGroupHandle(worldPos, this.store)) {
+            const graph = this.store.graph.current;
+            if (graph) {
+                const offsets = new Map<string, Vec2>();
+                for (const nodeId of interaction.selectedNodes) {
+                    const n = graph.nodes[nodeId];
+                    if (n) {
+                        offsets.set(nodeId, sub(worldPos, { x: n.position.x, y: n.position.y }));
+                    }
+                }
+                interaction.dragState = { type: 'group', startPos: worldPos, nodeOffsets: offsets };
+                return;
+            }
         }
 
         // Check slot hit first (higher priority than node)
@@ -227,6 +246,9 @@ export class InteractionHandler {
                 case 'select':
                     updateBoxSelect(worldPos, drag);
                     break;
+                case 'group':
+                    this.updateGroupDrag(worldPos, drag);
+                    break;
             }
             return;
         }
@@ -273,9 +295,24 @@ export class InteractionHandler {
                 case 'pan':
                     // Nothing to finalize
                     break;
+                case 'group':
+                    void endDrag(this.store, this.api);
+                    break;
             }
             interaction.dragState = null;
             interaction.clearCompatibleSlots();
+        }
+    }
+
+    private updateGroupDrag(worldPos: Vec2, drag: DragGroupState): void {
+        const graph = this.store.graph.current;
+        if (!graph) return;
+        for (const [nodeId, offset] of drag.nodeOffsets) {
+            const n = graph.nodes[nodeId];
+            if (n) {
+                n.position.x = worldPos.x - offset.x;
+                n.position.y = worldPos.y - offset.y;
+            }
         }
     }
 
