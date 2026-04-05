@@ -377,15 +377,13 @@ export class InteractionHandler {
             const nodeType = this.store.graph.getNodeType(node.type);
             if (!nodeType) return;
 
-            // Show config modal for nodes with config or delay-category nodes
-            if (node.config || nodeType.category === 'delay') {
-                this.configModal.show(node, nodeType, (config) => {
-                    node.config = config;
-                    void this.api.updateGraph(graph.id, graph).catch(err => {
-                        console.error('Failed to persist config update:', err);
-                    });
+            // Show config modal for any node
+            this.configModal.show(node, nodeType, (config) => {
+                node.config = Object.keys(config).length > 0 ? config : undefined;
+                void this.api.updateGraph(graph.id, graph).catch(err => {
+                    console.error('Failed to persist config update:', err);
                 });
-            }
+            });
             return;
         }
 

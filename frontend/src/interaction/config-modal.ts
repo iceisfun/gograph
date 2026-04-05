@@ -60,15 +60,26 @@ export class ConfigModal {
         const config = { ...(node.config || {}) };
         const inputs: Record<string, HTMLInputElement> = {};
 
-        // Config fields - for delay nodes show duration
+        // Config fields — category-aware defaults + any existing keys
         const fields: { key: string; label: string; type: string; placeholder: string }[] = [];
 
-        // Auto-detect configurable fields or use known ones
-        if (config.duration !== undefined || _nodeType.category === 'delay') {
-            fields.push({ key: 'duration', label: 'Duration (ms)', type: 'number', placeholder: '1000' });
+        // Known defaults by node type name or category
+        const knownFields: Record<string, { key: string; label: string; type: string; placeholder: string }[]> = {
+            delay:     [{ key: 'duration', label: 'Hold Duration (ms)', type: 'number', placeholder: '1000' }],
+            oscillator:[{ key: 'period', label: 'Period (ms)', type: 'number', placeholder: '2000' }],
+            counter:   [{ key: 'period', label: 'Count Period (ms)', type: 'number', placeholder: '5000' }],
+            ratelimit: [{ key: 'rate', label: 'Rate Window (ms)', type: 'number', placeholder: '2000' }],
+            shift_register: [{ key: 'bits', label: 'Bits', type: 'number', placeholder: '8' },
+                             { key: 'speed', label: 'Shift Speed (ms)', type: 'number', placeholder: '500' }],
+        };
+
+        // Add known fields for this type
+        const typeDefaults = knownFields[_nodeType.name] || [];
+        for (const f of typeDefaults) {
+            fields.push(f);
         }
 
-        // Also show any existing config keys
+        // Also show any existing config keys not already listed
         for (const key of Object.keys(config)) {
             if (!fields.find(f => f.key === key)) {
                 fields.push({ key, label: key, type: 'text', placeholder: '' });
