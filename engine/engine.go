@@ -129,17 +129,23 @@ func (e *Engine) emit(evt Event) {
 //
 // Returns an error if the graph has cycles, a node type is missing, or
 // execution fails.
+// Execute runs the graph in topological order. It is safe to call
+// concurrently — each invocation works with its own graph snapshot
+// and local state, so multiple executions can overlap.
 func (e *Engine) Execute(ctx context.Context) error {
-	// Reload graph from store to pick up frontend edits.
+	// Load a snapshot of the graph for this execution.
+	var g *graph.Graph
 	if e.store != nil {
-		g, err := e.store.Load(ctx, e.graphID)
+		var err error
+		g, err = e.store.Load(ctx, e.graphID)
 		if err != nil {
 			return fmt.Errorf("load graph: %w", err)
 		}
-		e.graph = g
+	} else {
+		g = e.graph
 	}
 
-	order, err := Order(e.graph)
+	order, err := Order(g)
 	if err != nil {
 		return err
 	}
@@ -156,7 +162,7 @@ func (e *Engine) Execute(ctx context.Context) error {
 			return err
 		}
 
-		node := e.graph.Node(nodeID)
+		node := g.Node(nodeID)
 		if node == nil {
 			continue
 		}
@@ -167,7 +173,7 @@ func (e *Engine) Execute(ctx context.Context) error {
 		}
 
 		// Gather inputs from upstream connections.
-		inputs := e.gatherInputs(nodeID, outputs)
+		inputs := e.gatherInputs(g, nodeID, outputs)
 
 		// Skip nodes that expect inputs but have none connected.
 		if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
@@ -176,7 +182,7 @@ func (e *Engine) Execute(ctx context.Context) error {
 		}
 
 		// Wait for incoming traversals to complete.
-		if waitErr := e.waitForArrivals(ctx, nodeID, emitTimes); waitErr != nil {
+		if waitErr := e.waitForArrivals(ctx, g, nodeID, emitTimes); waitErr != nil {
 			return waitErr
 		}
 
@@ -225,10 +231,10 @@ func (e *Engine) Execute(ctx context.Context) error {
 		}
 
 		// Log disconnected output slots.
-		e.logDisconnectedOutputs(nodeID, nt)
+		e.logDisconnectedOutputs(g, nodeID, nt)
 
 		// Emit events on outgoing connections and record the emit time.
-		e.emitNodeOutputEvents(nodeID)
+		e.emitNodeOutputEvents(g, nodeID)
 		emitTimes[nodeID] = time.Now()
 	}
 
@@ -239,10 +245,10 @@ func (e *Engine) Execute(ctx context.Context) error {
 // completed. For each incoming connection, we compute when the upstream
 // node emitted plus the connection's traversal duration, and sleep until
 // the latest arrival time.
-func (e *Engine) waitForArrivals(ctx context.Context, nodeID string, emitTimes map[string]time.Time) error {
-	e.graph.RLock()
+func (e *Engine) waitForArrivals(ctx context.Context, g *graph.Graph, nodeID string, emitTimes map[string]time.Time) error {
+	g.RLock()
 	var latestArrival time.Time
-	for _, c := range e.graph.Connections {
+	for _, c := range g.Connections {
 		if c.ToNode != nodeID {
 			continue
 		}
@@ -263,7 +269,7 @@ func (e *Engine) waitForArrivals(ctx context.Context, nodeID string, emitTimes m
 			latestArrival = arrival
 		}
 	}
-	e.graph.RUnlock()
+	g.RUnlock()
 
 	if !latestArrival.IsZero() {
 		wait := time.Until(latestArrival)
@@ -281,12 +287,12 @@ func (e *Engine) waitForArrivals(ctx context.Context, nodeID string, emitTimes m
 }
 
 // gatherInputs collects values from upstream connections for a given node.
-func (e *Engine) gatherInputs(nodeID string, outputs map[string]map[string]any) map[string]any {
-	e.graph.RLock()
-	defer e.graph.RUnlock()
+func (e *Engine) gatherInputs(g *graph.Graph, nodeID string, outputs map[string]map[string]any) map[string]any {
+	g.RLock()
+	defer g.RUnlock()
 
 	inputs := make(map[string]any)
-	for _, c := range e.graph.Connections {
+	for _, c := range g.Connections {
 		if c.ToNode == nodeID {
 			if nodeOut, ok := outputs[c.FromNode]; ok {
 				if val, ok := nodeOut[c.FromSlot]; ok {
@@ -299,13 +305,13 @@ func (e *Engine) gatherInputs(nodeID string, outputs map[string]map[string]any) 
 }
 
 // logDisconnectedOutputs logs output slots that have no outgoing connections.
-func (e *Engine) logDisconnectedOutputs(nodeID string, nt graph.NodeType) {
-	e.graph.RLock()
-	defer e.graph.RUnlock()
+func (e *Engine) logDisconnectedOutputs(g *graph.Graph, nodeID string, nt graph.NodeType) {
+	g.RLock()
+	defer g.RUnlock()
 
 	for _, slot := range nt.OutputSlots() {
 		connected := false
-		for _, c := range e.graph.Connections {
+		for _, c := range g.Connections {
 			if c.FromNode == nodeID && c.FromSlot == slot.ID {
 				connected = true
 				break
@@ -320,15 +326,15 @@ func (e *Engine) logDisconnectedOutputs(nodeID string, nt graph.NodeType) {
 // emitNodeOutputEvents emits EventStart for each outgoing connection from
 // the node. Traversal duration is read from each connection's Config["duration"].
 // Connections without a duration are treated as instant (duration=0).
-func (e *Engine) emitNodeOutputEvents(nodeID string) {
-	e.graph.RLock()
+func (e *Engine) emitNodeOutputEvents(g *graph.Graph, nodeID string) {
+	g.RLock()
 	connections := make([]*graph.Connection, 0)
-	for _, c := range e.graph.Connections {
+	for _, c := range g.Connections {
 		if c.FromNode == nodeID {
 			connections = append(connections, c)
 		}
 	}
-	e.graph.RUnlock()
+	g.RUnlock()
 
 	now := time.Now().UnixMilli()
 	for _, c := range connections {

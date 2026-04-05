@@ -167,16 +167,27 @@ func main() {
 		}
 	}()
 
-	// Execute every 5 seconds after a 2s startup delay.
+	// Fire on a fixed ticker so multiple executions can overlap.
 	go func() {
 		time.Sleep(2 * time.Second)
-		for {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		// Fire immediately on first tick.
+		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 			if err := eng.Execute(ctx); err != nil {
 				log.Printf("execution error: %v", err)
 			}
-			cancel()
-			time.Sleep(5 * time.Second)
+		}()
+		for range ticker.C {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := eng.Execute(ctx); err != nil {
+					log.Printf("execution error: %v", err)
+				}
+			}()
 		}
 	}()
 
