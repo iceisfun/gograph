@@ -94,18 +94,9 @@ func main() {
 		}
 	}()
 
-	// Execute the graph periodically to demonstrate animations.
-	go func() {
-		time.Sleep(2 * time.Second) // Wait for server startup.
-		for {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := eng.Execute(ctx); err != nil {
-				log.Printf("execution error: %v", err)
-			}
-			cancel()
-			time.Sleep(5 * time.Second)
-		}
-	}()
+	// Start the engine — executes every 5 seconds in the background.
+	eng.Start(context.Background(), 5*time.Second)
+	defer eng.Stop()
 
 	fmt.Printf("GoGraph (Lua): http://127.0.0.1%s\n", *addr)
 	log.Fatal(srv.ListenAndServe(*addr))

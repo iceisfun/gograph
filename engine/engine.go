@@ -24,6 +24,9 @@ type Executor interface {
 // Engine executes a graph by traversing nodes in topological order and
 // running each node's logic via an [Executor]. Events are emitted to
 // subscribers for real-time visualization.
+//
+// Use [Start] to begin periodic execution in the background and cancel
+// the context (or call [Stop]) to shut down gracefully.
 type Engine struct {
 	mu          sync.RWMutex
 	graph       *graph.Graph
@@ -35,6 +38,10 @@ type Engine struct {
 	duration    int // default event duration in ms
 	nodeLogger  NodeLogger
 	eventLogger EventLogger
+
+	// lifecycle
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // EngineOption configures an [Engine].
@@ -110,6 +117,47 @@ func (e *Engine) Subscribe(bufferSize int) *Subscriber {
 	e.subscribers = append(e.subscribers, sub)
 	e.mu.Unlock()
 	return sub
+}
+
+// Start begins periodic execution at the given interval. Each tick
+// launches a concurrent execution against the latest graph snapshot.
+// Execution stops when the context is cancelled or [Stop] is called.
+// Start returns immediately; execution runs in the background.
+func (e *Engine) Start(ctx context.Context, interval time.Duration) {
+	ctx, e.cancel = context.WithCancel(ctx)
+	e.wg.Go(func() {
+		// Fire immediately on start.
+		e.fireExecution(ctx)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				e.fireExecution(ctx)
+			}
+		}
+	})
+}
+
+// Stop cancels periodic execution and waits for all in-flight
+// executions to complete.
+func (e *Engine) Stop() {
+	if e.cancel != nil {
+		e.cancel()
+	}
+	e.wg.Wait()
+}
+
+// fireExecution launches a single graph execution in its own goroutine.
+func (e *Engine) fireExecution(ctx context.Context) {
+	e.wg.Go(func() {
+		if err := e.Execute(ctx); err != nil && ctx.Err() == nil {
+			e.nodeLogger.NodeSkipped("*", "execution error: "+err.Error())
+		}
+	})
 }
 
 // emit sends an event to all active subscribers.

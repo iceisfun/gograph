@@ -167,29 +167,9 @@ func main() {
 		}
 	}()
 
-	// Fire on a fixed ticker so multiple executions can overlap.
-	go func() {
-		time.Sleep(2 * time.Second)
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		// Fire immediately on first tick.
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := eng.Execute(ctx); err != nil {
-				log.Printf("execution error: %v", err)
-			}
-		}()
-		for range ticker.C {
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				if err := eng.Execute(ctx); err != nil {
-					log.Printf("execution error: %v", err)
-				}
-			}()
-		}
-	}()
+	// Start the engine — executes every 5 seconds in the background.
+	eng.Start(context.Background(), 5*time.Second)
+	defer eng.Stop()
 
 	fmt.Printf("GoGraph Showcase: http://127.0.0.1%s\n", *addr)
 	log.Fatal(srv.ListenAndServe(*addr))
