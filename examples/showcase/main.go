@@ -116,6 +116,97 @@ func main() {
 		Script: mustReadFile("scripts/randomcase.lua"),
 	}))
 
+	// Logic & utility nodes
+	must(reg.Register(graph.NodeType{
+		Name: "oscillator", Label: "Oscillator", Category: "source", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/oscillator.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "switch", Label: "Switch", Category: "transform", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
+			{ID: "on", Name: "On", Direction: graph.Output, DataType: "string"},
+			{ID: "off", Name: "Off", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/switch.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "words", Label: "Words", Category: "source", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/words.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "splitter", Label: "Splitter", Category: "transform", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/splitter.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "ratelimit", Label: "Rate Limit", Category: "transform", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
+		},
+		Script: mustReadFile("scripts/ratelimit.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "and", Label: "AND", Category: "logic", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "a", Name: "A", Direction: graph.Input, DataType: "string"},
+			{ID: "b", Name: "B", Direction: graph.Input, DataType: "string"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/and.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "or", Label: "OR", Category: "logic", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "a", Name: "A", Direction: graph.Input, DataType: "string"},
+			{ID: "b", Name: "B", Direction: graph.Input, DataType: "string"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/or.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "xor", Label: "XOR", Category: "logic", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "a", Name: "A", Direction: graph.Input, DataType: "string"},
+			{ID: "b", Name: "B", Direction: graph.Input, DataType: "string"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/xor.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "not", Label: "NOT", Category: "logic", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/not.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "counter", Label: "Counter", Category: "source", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/counter.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "shift_register", Label: "Shift Register", Category: "logic", ContentHeight: 30,
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
+		},
+		Script: mustReadFile("scripts/shift_register.lua"),
+	}))
+
 	// Build the showcase graph with multiple paths.
 	//
 	//   src1 ("Hello, World!") --> lower --> delay1 (500ms) --> hex1
@@ -154,6 +245,26 @@ func main() {
 	must(g.Connect(&graph.Connection{ID: "c7", FromNode: "delay2", FromSlot: "out", ToNode: "rcase", ToSlot: "in", Config: map[string]string{"duration": "1200"}}))
 	must(g.Connect(&graph.Connection{ID: "c7b", FromNode: "rcase", FromSlot: "out", ToNode: "reverse2", ToSlot: "in", Config: map[string]string{"duration": "600"}}))
 	must(g.Connect(&graph.Connection{ID: "c8", FromNode: "reverse2", FromSlot: "out", ToNode: "hex2", ToSlot: "in"}))                                                 // instant
+
+	// Row 4: oscillator -> switch -> show (on path) / show (off path)
+	must(g.AddNode(&graph.Node{ID: "osc1", Type: "oscillator", Label: "Oscillator", Position: graph.Position{X: 80, Y: 580}, Config: map[string]string{"period": "3000"}}))
+	must(g.AddNode(&graph.Node{ID: "sw1", Type: "switch", Label: "Switch", Position: graph.Position{X: 400, Y: 580}}))
+	must(g.AddNode(&graph.Node{ID: "show_on", Type: "show", Label: "Show (On)", Position: graph.Position{X: 700, Y: 520}}))
+	must(g.AddNode(&graph.Node{ID: "show_off", Type: "show", Label: "Show (Off)", Position: graph.Position{X: 700, Y: 650}}))
+
+	must(g.Connect(&graph.Connection{ID: "c9", FromNode: "osc1", FromSlot: "out", ToNode: "sw1", ToSlot: "in", Config: map[string]string{"duration": "600"}}))
+	must(g.Connect(&graph.Connection{ID: "c10", FromNode: "sw1", FromSlot: "on", ToNode: "show_on", ToSlot: "in"}))
+	must(g.Connect(&graph.Connection{ID: "c11", FromNode: "sw1", FromSlot: "off", ToNode: "show_off", ToSlot: "in"}))
+
+	// Row 5: two oscillators -> AND gate -> show
+	must(g.AddNode(&graph.Node{ID: "osc2", Type: "oscillator", Label: "Osc A", Position: graph.Position{X: 80, Y: 780}, Config: map[string]string{"period": "4000"}}))
+	must(g.AddNode(&graph.Node{ID: "osc3", Type: "oscillator", Label: "Osc B", Position: graph.Position{X: 80, Y: 900}, Config: map[string]string{"period": "6000"}}))
+	must(g.AddNode(&graph.Node{ID: "and1", Type: "and", Label: "AND", Position: graph.Position{X: 400, Y: 840}}))
+	must(g.AddNode(&graph.Node{ID: "show_and", Type: "show", Label: "AND Result", Position: graph.Position{X: 700, Y: 840}}))
+
+	must(g.Connect(&graph.Connection{ID: "c12", FromNode: "osc2", FromSlot: "out", ToNode: "and1", ToSlot: "a", Config: map[string]string{"duration": "500"}}))
+	must(g.Connect(&graph.Connection{ID: "c13", FromNode: "osc3", FromSlot: "out", ToNode: "and1", ToSlot: "b", Config: map[string]string{"duration": "500"}}))
+	must(g.Connect(&graph.Connection{ID: "c14", FromNode: "and1", FromSlot: "out", ToNode: "show_and", ToSlot: "in"}))
 
 	// Persist.
 	st := store.NewMemoryStore()

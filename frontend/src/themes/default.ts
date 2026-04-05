@@ -50,6 +50,7 @@ export const defaultTheme: Theme = {
         transform: { fill: '#2a1a3e', stroke: '#5f3460', titleBar: '#3a1a4e' },
         output: { fill: '#3e2a1a', stroke: '#b05020', titleBar: '#4e3a1a' },
         delay: { fill: '#3e3a1a', stroke: '#a09020', titleBar: '#4e4a1a' },
+        logic: { fill: '#1a2a3e', stroke: '#3060a0', titleBar: '#1a3050' },
     },
 
     // Active node border
