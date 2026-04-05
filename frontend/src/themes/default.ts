@@ -78,6 +78,12 @@ export const defaultTheme: Theme = {
     nodeShakeDuration: 300,
     nodeShakeIntensity: 3,
 
+    // Connection duration capsule
+    connectionCapsuleFill: '#1a1a2e',
+    connectionCapsuleStroke: '#4a4a8a',
+    connectionCapsuleText: '#999999',
+    connectionCapsuleFont: '10px sans-serif',
+
     // Node glow (delay/buffer holding)
     nodeGlowColor: 'rgba(160, 144, 32, 0.85)',
     nodeGlowRadius: 28,

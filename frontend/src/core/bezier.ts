@@ -34,6 +34,18 @@ export function bezierPoint(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): 
 }
 
 /**
+ * Compute the tangent (derivative) of a cubic Bezier at parameter t.
+ * Returns an unnormalized direction vector.
+ */
+export function bezierTangent(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
+    const u = 1 - t;
+    return vec2(
+        3 * u * u * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x),
+        3 * u * u * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y),
+    );
+}
+
+/**
  * A cached Bezier path that stores endpoints and control points.
  */
 export class BezierPath {

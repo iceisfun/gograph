@@ -1,6 +1,6 @@
 import type { AppStore } from '../state/store.js';
 import type { Theme } from '../themes/theme.js';
-import { computeControlPoints } from '../core/bezier.js';
+import { computeControlPoints, bezierPoint, bezierTangent } from '../core/bezier.js';
 
 export function drawConnections(
     ctx: CanvasRenderingContext2D,
@@ -37,6 +37,54 @@ export function drawConnections(
         }
 
         ctx.stroke();
+
+        // Duration capsule at midpoint for timed connections
+        const duration = conn.config?.duration;
+        if (duration && parseInt(duration) > 0) {
+            const mid = bezierPoint(from, cp1, cp2, to, 0.5);
+            const tan = bezierTangent(from, cp1, cp2, to, 0.5);
+            const angle = Math.atan2(tan.y, tan.x);
+
+            const label = `${duration}ms`;
+            ctx.save();
+            ctx.font = theme.connectionCapsuleFont;
+            const textW = ctx.measureText(label).width;
+            const padX = 6;
+            const padY = 3;
+            const capsuleW = textW + padX * 2;
+            const capsuleH = 14 + padY * 2;
+            const r = capsuleH / 2;
+
+            ctx.translate(mid.x, mid.y);
+            ctx.rotate(angle);
+
+            // Draw capsule shape (rounded rect centered at origin)
+            ctx.beginPath();
+            ctx.moveTo(-capsuleW / 2 + r, -capsuleH / 2);
+            ctx.lineTo(capsuleW / 2 - r, -capsuleH / 2);
+            ctx.arc(capsuleW / 2 - r, 0, r, -Math.PI / 2, Math.PI / 2);
+            ctx.lineTo(-capsuleW / 2 + r, capsuleH / 2);
+            ctx.arc(-capsuleW / 2 + r, 0, r, Math.PI / 2, -Math.PI / 2);
+            ctx.closePath();
+
+            ctx.fillStyle = theme.connectionCapsuleFill;
+            ctx.fill();
+            ctx.strokeStyle = theme.connectionCapsuleStroke;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Draw text (flip if upside-down so text is always readable)
+            const flipped = angle > Math.PI / 2 || angle < -Math.PI / 2;
+            if (flipped) {
+                ctx.rotate(Math.PI);
+            }
+            ctx.fillStyle = theme.connectionCapsuleText;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, 0, 0);
+
+            ctx.restore();
+        }
 
         // Active connection dashing animation
         const activeConn = store.animation.activeConnections.get(conn.id);

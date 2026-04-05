@@ -75,6 +75,12 @@ export interface Theme {
     nodeShakeDuration: number;
     nodeShakeIntensity: number;
 
+    // Connection duration capsule
+    connectionCapsuleFill: string;
+    connectionCapsuleStroke: string;
+    connectionCapsuleText: string;
+    connectionCapsuleFont: string;
+
     // Node glow (delay/buffer holding)
     nodeGlowColor: string;
     nodeGlowRadius: number;
