@@ -78,12 +78,15 @@ type Node struct {
 }
 
 // Connection is a directed edge from an output slot to an input slot.
+// The optional Config map holds per-connection properties such as
+// "duration" (traversal time in milliseconds for animation).
 type Connection struct {
-	ID       string `json:"id"`
-	FromNode string `json:"fromNode"`
-	FromSlot string `json:"fromSlot"`
-	ToNode   string `json:"toNode"`
-	ToSlot   string `json:"toSlot"`
+	ID       string            `json:"id"`
+	FromNode string            `json:"fromNode"`
+	FromSlot string            `json:"fromSlot"`
+	ToNode   string            `json:"toNode"`
+	ToSlot   string            `json:"toSlot"`
+	Config   map[string]string `json:"config,omitempty"`
 }
 
 // Graph is the top-level container for nodes and connections. It is safe for

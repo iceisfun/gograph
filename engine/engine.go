@@ -189,8 +189,8 @@ func (e *Engine) Execute(ctx context.Context) error {
 		e.logDisconnectedOutputs(nodeID, nt)
 
 		// Emit events on outgoing connections.
-		// Per-node duration override via config["duration"].
-		e.emitNodeOutputEvents(nodeID, config)
+		// Traversal duration is per-connection via connection.Config["duration"].
+		e.emitNodeOutputEvents(nodeID)
 	}
 
 	return nil
@@ -233,9 +233,10 @@ func (e *Engine) logDisconnectedOutputs(nodeID string, nt graph.NodeType) {
 	}
 }
 
-// emitNodeOutputEvents emits EventStart for each outgoing connection from the node.
-// The config map is checked for a "duration" key to override the default event duration.
-func (e *Engine) emitNodeOutputEvents(nodeID string, config map[string]string) {
+// emitNodeOutputEvents emits EventStart for each outgoing connection from
+// the node. Traversal duration is read from each connection's Config["duration"].
+// Connections without a duration are treated as instant (duration=0).
+func (e *Engine) emitNodeOutputEvents(nodeID string) {
 	e.graph.RLock()
 	connections := make([]*graph.Connection, 0)
 	for _, c := range e.graph.Connections {
@@ -245,16 +246,18 @@ func (e *Engine) emitNodeOutputEvents(nodeID string, config map[string]string) {
 	}
 	e.graph.RUnlock()
 
-	// Per-node duration override.
-	duration := e.duration
-	if d, ok := config["duration"]; ok {
-		if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
-			duration = ms
-		}
-	}
-
 	now := time.Now().UnixMilli()
 	for _, c := range connections {
+		// Per-connection traversal duration.
+		duration := 0
+		if c.Config != nil {
+			if d, ok := c.Config["duration"]; ok {
+				if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
+					duration = ms
+				}
+			}
+		}
+
 		eventID := generateEventID()
 		e.emit(Event{
 			Type: graph.TypeEventStart,
@@ -266,17 +269,28 @@ func (e *Engine) emitNodeOutputEvents(nodeID string, config map[string]string) {
 			},
 		})
 
-		// Schedule the end event after the duration.
-		go func(eid string, dur int) {
-			time.Sleep(time.Duration(dur) * time.Millisecond)
+		if duration > 0 {
+			// Timed: schedule end event after traversal.
+			go func(eid string, dur int) {
+				time.Sleep(time.Duration(dur) * time.Millisecond)
+				e.emit(Event{
+					Type: graph.TypeEventEnd,
+					Payload: graph.EventEndPayload{
+						Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
+						EventID:  eid,
+					},
+				})
+			}(eventID, duration)
+		} else {
+			// Instant: emit end immediately.
 			e.emit(Event{
 				Type: graph.TypeEventEnd,
 				Payload: graph.EventEndPayload{
-					Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
-					EventID:  eid,
+					Envelope: graph.NewEnvelope(now),
+					EventID:  eventID,
 				},
 			})
-		}(eventID, duration)
+		}
 	}
 }
 
