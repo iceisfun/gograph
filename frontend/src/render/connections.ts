@@ -1,6 +1,7 @@
 import type { AppStore } from '../state/store.js';
 import type { Theme } from '../themes/theme.js';
 import { computeControlPoints, bezierPoint, bezierTangent } from '../core/bezier.js';
+import { distance } from '../core/geometry.js';
 
 export function drawConnections(
     ctx: CanvasRenderingContext2D,
@@ -40,7 +41,19 @@ export function drawConnections(
 
         // Duration capsule at midpoint for timed connections
         const duration = conn.config?.duration;
-        if (duration && parseInt(duration) > 0) {
+        const connDist = distance(from, to);
+        const capsuleMode = theme.connectionCapsuleVisibility;
+        const capsuleVisible = duration && parseInt(duration) > 0
+            && connDist >= theme.connectionCapsuleMinDistance
+            && (capsuleMode === 'always'
+                || (capsuleMode === 'hover' && (isHovered || isSelected))
+                || (capsuleMode === 'related' && (isHovered || isSelected
+                    || store.interaction.hoveredNode === conn.fromNode
+                    || store.interaction.hoveredNode === conn.toNode
+                    || store.interaction.selectedNodes.has(conn.fromNode)
+                    || store.interaction.selectedNodes.has(conn.toNode))));
+
+        if (capsuleVisible) {
             const mid = bezierPoint(from, cp1, cp2, to, 0.5);
             const tan = bezierTangent(from, cp1, cp2, to, 0.5);
             const angle = Math.atan2(tan.y, tan.x);

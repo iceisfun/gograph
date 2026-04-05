@@ -76,6 +76,8 @@ export interface Theme {
     nodeShakeIntensity: number;
 
     // Connection duration capsule
+    connectionCapsuleVisibility: 'always' | 'hover' | 'related';
+    connectionCapsuleMinDistance: number;
     connectionCapsuleFill: string;
     connectionCapsuleStroke: string;
     connectionCapsuleText: string;
