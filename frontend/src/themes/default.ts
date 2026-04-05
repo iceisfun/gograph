@@ -82,7 +82,7 @@ export const defaultTheme: Theme = {
     // 'always' = show all, 'hover' = only when connection hovered/selected,
     // 'related' = when connection or either endpoint node hovered/selected
     connectionCapsuleVisibility: 'related',
-    connectionCapsuleMinDistance: 100,
+    connectionCapsuleMinDistance: 75,
     connectionCapsuleFill: '#1a1a2e',
     connectionCapsuleStroke: '#4a4a8a',
     connectionCapsuleText: '#999999',
