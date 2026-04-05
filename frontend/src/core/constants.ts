@@ -1,0 +1,11 @@
+export const NODE_WIDTH = 180;
+export const NODE_TITLE_HEIGHT = 28;
+export const SLOT_SPACING = 24;
+export const SLOT_RADIUS = 6;
+export const SLOT_OFFSET_X = 0;
+export const MIN_NODE_HEIGHT = 60;
+export const GRID_SIZE = 20;
+export const GRID_MAJOR_EVERY = 5;
+export const CONNECTION_CURVE_OFFSET = 0.4;
+export const EVENT_DOT_RADIUS = 5;
+export const DEFAULT_EVENT_DURATION = 1000;

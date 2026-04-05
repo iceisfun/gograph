@@ -1,0 +1,42 @@
+export interface Graph {
+    id: string;
+    version: number;
+    nodes: Record<string, Node>;
+    connections: Connection[];
+    metadata?: Record<string, string>;
+}
+
+export interface Node {
+    id: string;
+    type: string;
+    label: string;
+    position: Position;
+    config?: Record<string, string>;
+}
+
+export interface Position {
+    x: number;
+    y: number;
+}
+
+export interface Slot {
+    id: string;
+    name: string;
+    direction: 'input' | 'output';
+    dataType: string;
+}
+
+export interface Connection {
+    id: string;
+    fromNode: string;
+    fromSlot: string;
+    toNode: string;
+    toSlot: string;
+}
+
+export interface NodeType {
+    name: string;
+    label: string;
+    slots: Slot[];
+    scriptName?: string;
+}
