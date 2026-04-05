@@ -6,5 +6,5 @@ end
 if #words == 0 then
     return { out = "", _display = "(empty)" }
 end
-local idx = math.floor(_time / 1000) % #words + 1
+local idx = math.floor(time.now() / 1000) % #words + 1
 return { out = words[idx], _display = words[idx] .. " [" .. idx .. "/" .. #words .. "]" }

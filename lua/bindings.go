@@ -3,7 +3,6 @@ package lua
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/iceisfun/golua/v2/compiler"
 	"github.com/iceisfun/golua/v2/parser"
@@ -86,8 +85,8 @@ func (b *Bindings) ExecuteNode(ctx context.Context, nt graph.NodeType, inputs ma
 	}
 	v.SetGlobal("config", vm.NewTable(configTable))
 
-	// Set _time global (millisecond timestamp for time-aware scripts).
-	v.SetGlobal("_time", vm.NewFloat(float64(time.Now().UnixMilli())))
+	// Enable the time provider so scripts can use time.now(), time.tick(), etc.
+	v.SetTimeProvider(vm.NewDefaultTimeProvider())
 
 	// Run the script.
 	results, err := v.Run(proto)

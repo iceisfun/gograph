@@ -7,5 +7,5 @@ local phrases = {
     "Scan complete", "Route alpha", "Queue empty",
     "Heartbeat", "System nominal",
 }
-local idx = math.floor(_time / 5000) % #phrases + 1
+local idx = math.floor(time.now() / 5000) % #phrases + 1
 return { out = phrases[idx], _display = phrases[idx] }
