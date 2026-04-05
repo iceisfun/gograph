@@ -94,6 +94,27 @@ func main() {
 		},
 		Script: mustReadFile("scripts/delay.lua"),
 	}))
+	must(reg.Register(graph.NodeType{
+		Name:          "show",
+		Label:         "Show",
+		Category:      "output",
+		ContentHeight: 40,
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/show.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name:          "randomcase",
+		Label:         "RanDOmCaSe",
+		Category:      "transform",
+		ContentHeight: 40,
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/randomcase.lua"),
+	}))
 
 	// Build the showcase graph with multiple paths.
 	//
@@ -101,7 +122,7 @@ func main() {
 	//        |
 	//        +--> reverse --> print1
 	//
-	//   src2 ("GoGraph!") --> delay2 (1500ms) --> reverse2 --> hex2
+	//   src2 ("GoGraph!") --> delay2 (1500ms) --> randomcase --> reverse2 --> hex2
 	//
 	g := graph.NewGraph("showcase")
 
@@ -113,13 +134,14 @@ func main() {
 
 	// Row 2: src1 -> reverse -> print1
 	must(g.AddNode(&graph.Node{ID: "reverse", Type: "reverse", Label: "Reverse", Position: graph.Position{X: 350, Y: 280}}))
-	must(g.AddNode(&graph.Node{ID: "print1", Type: "print", Label: "Print", Position: graph.Position{X: 620, Y: 280}}))
+	must(g.AddNode(&graph.Node{ID: "print1", Type: "show", Label: "Show", Position: graph.Position{X: 620, Y: 280}}))
 
-	// Row 3: src2 -> delay2 -> reverse2 -> hex2
+	// Row 3: src2 -> delay2 -> randomcase -> reverse2 -> hex2
 	must(g.AddNode(&graph.Node{ID: "src2", Type: "source2", Label: "GoGraph!", Position: graph.Position{X: 80, Y: 420}}))
 	must(g.AddNode(&graph.Node{ID: "delay2", Type: "delay", Label: "Delay 1500ms", Position: graph.Position{X: 350, Y: 420}, Config: map[string]string{"duration": "1500"}}))
-	must(g.AddNode(&graph.Node{ID: "reverse2", Type: "reverse", Label: "Reverse", Position: graph.Position{X: 620, Y: 420}}))
-	must(g.AddNode(&graph.Node{ID: "hex2", Type: "hexdump", Label: "Hex Dump", Position: graph.Position{X: 890, Y: 420}}))
+	must(g.AddNode(&graph.Node{ID: "rcase", Type: "randomcase", Label: "RanDOmCaSe", Position: graph.Position{X: 530, Y: 420}}))
+	must(g.AddNode(&graph.Node{ID: "reverse2", Type: "reverse", Label: "Reverse", Position: graph.Position{X: 750, Y: 420}}))
+	must(g.AddNode(&graph.Node{ID: "hex2", Type: "hexdump", Label: "Hex Dump", Position: graph.Position{X: 1020, Y: 420}}))
 
 	// Wire connections with per-connection traversal durations.
 	// Timed connections show animated dots, instant ones just flash/dash.
@@ -129,8 +151,9 @@ func main() {
 	must(g.Connect(&graph.Connection{ID: "c4", FromNode: "src1", FromSlot: "out", ToNode: "reverse", ToSlot: "in", Config: map[string]string{"duration": "1000"}}))
 	must(g.Connect(&graph.Connection{ID: "c5", FromNode: "reverse", FromSlot: "out", ToNode: "print1", ToSlot: "in"}))                                              // instant
 	must(g.Connect(&graph.Connection{ID: "c6", FromNode: "src2", FromSlot: "out", ToNode: "delay2", ToSlot: "in", Config: map[string]string{"duration": "800"}}))
-	must(g.Connect(&graph.Connection{ID: "c7", FromNode: "delay2", FromSlot: "out", ToNode: "reverse2", ToSlot: "in", Config: map[string]string{"duration": "1200"}}))
-	must(g.Connect(&graph.Connection{ID: "c8", FromNode: "reverse2", FromSlot: "out", ToNode: "hex2", ToSlot: "in"}))                                                // instant
+	must(g.Connect(&graph.Connection{ID: "c7", FromNode: "delay2", FromSlot: "out", ToNode: "rcase", ToSlot: "in", Config: map[string]string{"duration": "1200"}}))
+	must(g.Connect(&graph.Connection{ID: "c7b", FromNode: "rcase", FromSlot: "out", ToNode: "reverse2", ToSlot: "in", Config: map[string]string{"duration": "600"}}))
+	must(g.Connect(&graph.Connection{ID: "c8", FromNode: "reverse2", FromSlot: "out", ToNode: "hex2", ToSlot: "in"}))                                                 // instant
 
 	// Persist.
 	st := store.NewMemoryStore()
