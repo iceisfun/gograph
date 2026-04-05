@@ -39,6 +39,10 @@ type Engine struct {
 	nodeLogger  NodeLogger
 	eventLogger EventLogger
 
+	// Fast wire evaluation
+	wireInterval  time.Duration
+	lastWireState sync.Map // connectionID → last emitted value string
+
 	// lifecycle
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -87,6 +91,16 @@ func WithEventLogger(l EventLogger) EngineOption {
 	}
 }
 
+// WithWireInterval sets the evaluation interval for instant (wire-type)
+// connections. These run on a fast tick independent of the main execution
+// interval, updating wire states without sleeping for traversals.
+// Defaults to 0 (disabled — wires only update during normal execution).
+func WithWireInterval(d time.Duration) EngineOption {
+	return func(e *Engine) {
+		e.wireInterval = d
+	}
+}
+
 // WithEventDuration sets the default animation duration in milliseconds
 // for events traversing connections. Defaults to 1000ms.
 func WithEventDuration(ms int) EngineOption {
@@ -125,10 +139,10 @@ func (e *Engine) Subscribe(bufferSize int) *Subscriber {
 // Start returns immediately; execution runs in the background.
 func (e *Engine) Start(ctx context.Context, interval time.Duration) {
 	ctx, e.cancel = context.WithCancel(ctx)
-	e.wg.Go(func() {
-		// Fire immediately on start.
-		e.fireExecution(ctx)
 
+	// Main execution loop — full graph with timed traversals.
+	e.wg.Go(func() {
+		e.fireExecution(ctx)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -140,6 +154,22 @@ func (e *Engine) Start(ctx context.Context, interval time.Duration) {
 			}
 		}
 	})
+
+	// Fast wire evaluation loop — instant connections only, no sleeps.
+	if e.wireInterval > 0 {
+		e.wg.Go(func() {
+			ticker := time.NewTicker(e.wireInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					e.evaluateWires(ctx)
+				}
+			}
+		})
+	}
 }
 
 // Stop cancels periodic execution and waits for all in-flight
@@ -158,6 +188,105 @@ func (e *Engine) fireExecution(ctx context.Context) {
 			e.nodeLogger.NodeSkipped("*", "execution error: "+err.Error())
 		}
 	})
+}
+
+// evaluateWires runs a fast pass over the graph, executing all nodes
+// but only emitting connection.state events for instant connections
+// whose values have changed. No sleeps, no timed events.
+func (e *Engine) evaluateWires(ctx context.Context) {
+	var g *graph.Graph
+	if e.store != nil {
+		var err error
+		g, err = e.store.Load(ctx, e.graphID)
+		if err != nil {
+			return
+		}
+	} else {
+		g = e.graph
+	}
+
+	order, err := Order(g)
+	if err != nil {
+		return
+	}
+
+	outputs := make(map[string]map[string]any)
+
+	for _, nodeID := range order {
+		if ctx.Err() != nil {
+			return
+		}
+
+		node := g.Node(nodeID)
+		if node == nil {
+			continue
+		}
+		nt, ok := e.registry.Lookup(node.Type)
+		if !ok {
+			continue
+		}
+
+		inputs := e.gatherInputs(g, nodeID, outputs)
+		if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
+			continue
+		}
+
+		config := node.Config
+		if config == nil {
+			config = make(map[string]string)
+		}
+
+		var nodeOutputs map[string]any
+		if e.executor != nil && nt.Script != "" {
+			nodeOutputs, err = e.executor.ExecuteNode(ctx, nt, inputs, config)
+			if err != nil {
+				continue
+			}
+		} else {
+			nodeOutputs = inputs
+		}
+		delete(nodeOutputs, "_display")
+		outputs[nodeID] = nodeOutputs
+
+		// Emit connection.state for instant connections, only on change.
+		g.RLock()
+		for _, c := range g.Connections {
+			if c.FromNode != nodeID {
+				continue
+			}
+			// Only process instant connections.
+			if c.Config != nil {
+				if d, ok := c.Config["duration"]; ok {
+					if ms, parseErr := strconv.Atoi(d); parseErr == nil && ms > 0 {
+						continue
+					}
+				}
+			}
+
+			val := ""
+			if v, ok := nodeOutputs[c.FromSlot]; ok {
+				val = fmt.Sprintf("%v", v)
+			}
+
+			// Change detection — skip if value unchanged.
+			if prev, loaded := e.lastWireState.Load(c.ID); loaded && prev.(string) == val {
+				continue
+			}
+			e.lastWireState.Store(c.ID, val)
+
+			active := val != "" && val != "0" && val != "false" && val != "off" && val != "<nil>"
+			e.emit(Event{
+				Type: graph.TypeConnectionState,
+				Payload: graph.ConnectionStatePayload{
+					Envelope:     graph.NewEnvelope(time.Now().UnixMilli()),
+					ConnectionID: c.ID,
+					Active:       active,
+					Value:        val,
+				},
+			})
+		}
+		g.RUnlock()
+	}
 }
 
 // emit sends an event to all active subscribers.

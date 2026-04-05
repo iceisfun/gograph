@@ -302,6 +302,7 @@ func main() {
 		engine.WithExecutor(luaExec),
 		engine.WithEventDuration(1000),
 		engine.WithStore(st, g.ID),
+		engine.WithWireInterval(200*time.Millisecond),
 		engine.WithNodeLogger(engine.DebugNodeLogger{}),
 		engine.WithEventLogger(engine.DebugEventLogger{}),
 	)
