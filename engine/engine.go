@@ -252,6 +252,21 @@ func (e *Engine) Execute(ctx context.Context) error {
 			nodeOutputs = inputs
 		}
 
+		// Emit display content if the script returned a _display key.
+		if display, ok := nodeOutputs["_display"]; ok {
+			if text, ok := display.(string); ok {
+				e.emit(Event{
+					Type: graph.TypeNodeContent,
+					Payload: graph.NodeContentPayload{
+						Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
+						NodeID:   nodeID,
+						Text:     text,
+					},
+				})
+			}
+			delete(nodeOutputs, "_display")
+		}
+
 		outputs[nodeID] = nodeOutputs
 		e.nodeLogger.NodeExecuted(nodeID, node.Type, len(nodeOutputs))
 

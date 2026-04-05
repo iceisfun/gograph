@@ -9,12 +9,13 @@ import (
 // All [Node] instances referencing the same type name share these slot
 // definitions. The optional Script field holds Lua source for execution.
 type NodeType struct {
-	Name       string `json:"name"`
-	Label      string `json:"label"`
-	Category   string `json:"category,omitempty"`
-	Slots      []Slot `json:"slots"`
-	Script     string `json:"-"`
-	ScriptName string `json:"scriptName,omitempty"`
+	Name          string `json:"name"`
+	Label         string `json:"label"`
+	Category      string `json:"category,omitempty"`
+	ContentHeight int    `json:"contentHeight,omitempty"`
+	Slots         []Slot `json:"slots"`
+	Script        string `json:"-"`
+	ScriptName    string `json:"scriptName,omitempty"`
 }
 
 // InputSlots returns only the input slots for this type.

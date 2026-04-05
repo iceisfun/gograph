@@ -13,6 +13,7 @@ const (
 	TypeGraphUpdate      = "graph.update"
 	TypeNodeUpdate       = "node.update"
 	TypeNodeActive       = "node.active"
+	TypeNodeContent      = "node.content"
 	TypeConnectionUpdate = "connection.update"
 )
 
@@ -86,6 +87,15 @@ type NodeActivePayload struct {
 	Envelope
 	NodeID   string `json:"nodeID"`
 	Duration int    `json:"duration"`
+}
+
+// NodeContentPayload is sent when a node's display content changes.
+// Lua scripts return a "_display" key to set text content inside the node.
+type NodeContentPayload struct {
+	Envelope
+	NodeID string `json:"nodeID"`
+	Text   string `json:"text,omitempty"`
+	Image  string `json:"image,omitempty"`
 }
 
 // ConnectionUpdatePayload is sent when a single connection is added or modified.
