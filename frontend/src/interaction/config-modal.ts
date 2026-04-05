@@ -34,8 +34,13 @@ export class ConfigModal {
         container.style.position = 'relative';
         container.appendChild(this.overlay);
 
-        this.overlay.addEventListener('click', (e) => {
-            if (e.target === this.overlay) this.hide();
+        let mouseDownTarget: EventTarget | null = null;
+        this.overlay.addEventListener('mousedown', (e) => {
+            mouseDownTarget = e.target;
+        });
+        this.overlay.addEventListener('mouseup', (e) => {
+            if (mouseDownTarget === this.overlay && e.target === this.overlay) this.hide();
+            mouseDownTarget = null;
         });
 
         this.boundEscape = (e: KeyboardEvent) => {
