@@ -121,15 +121,16 @@ func main() {
 	must(g.AddNode(&graph.Node{ID: "reverse2", Type: "reverse", Label: "Reverse", Position: graph.Position{X: 620, Y: 420}}))
 	must(g.AddNode(&graph.Node{ID: "hex2", Type: "hexdump", Label: "Hex Dump", Position: graph.Position{X: 890, Y: 420}}))
 
-	// Wire connections.
-	must(g.Connect(&graph.Connection{ID: "c1", FromNode: "src1", FromSlot: "out", ToNode: "lower", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c2", FromNode: "lower", FromSlot: "out", ToNode: "delay1", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c3", FromNode: "delay1", FromSlot: "out", ToNode: "hex1", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c4", FromNode: "src1", FromSlot: "out", ToNode: "reverse", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c5", FromNode: "reverse", FromSlot: "out", ToNode: "print1", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c6", FromNode: "src2", FromSlot: "out", ToNode: "delay2", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c7", FromNode: "delay2", FromSlot: "out", ToNode: "reverse2", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c8", FromNode: "reverse2", FromSlot: "out", ToNode: "hex2", ToSlot: "in"}))
+	// Wire connections with per-connection traversal durations.
+	// Timed connections show animated dots, instant ones just flash/dash.
+	must(g.Connect(&graph.Connection{ID: "c1", FromNode: "src1", FromSlot: "out", ToNode: "lower", ToSlot: "in", Config: map[string]string{"duration": "800"}}))
+	must(g.Connect(&graph.Connection{ID: "c2", FromNode: "lower", FromSlot: "out", ToNode: "delay1", ToSlot: "in", Config: map[string]string{"duration": "600"}}))
+	must(g.Connect(&graph.Connection{ID: "c3", FromNode: "delay1", FromSlot: "out", ToNode: "hex1", ToSlot: "in"}))                                               // instant
+	must(g.Connect(&graph.Connection{ID: "c4", FromNode: "src1", FromSlot: "out", ToNode: "reverse", ToSlot: "in", Config: map[string]string{"duration": "1000"}}))
+	must(g.Connect(&graph.Connection{ID: "c5", FromNode: "reverse", FromSlot: "out", ToNode: "print1", ToSlot: "in"}))                                              // instant
+	must(g.Connect(&graph.Connection{ID: "c6", FromNode: "src2", FromSlot: "out", ToNode: "delay2", ToSlot: "in", Config: map[string]string{"duration": "800"}}))
+	must(g.Connect(&graph.Connection{ID: "c7", FromNode: "delay2", FromSlot: "out", ToNode: "reverse2", ToSlot: "in", Config: map[string]string{"duration": "1200"}}))
+	must(g.Connect(&graph.Connection{ID: "c8", FromNode: "reverse2", FromSlot: "out", ToNode: "hex2", ToSlot: "in"}))                                                // instant
 
 	// Persist.
 	st := store.NewMemoryStore()
