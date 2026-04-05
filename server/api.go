@@ -131,6 +131,11 @@ func (s *Server) handleClickNode(w http.ResponseWriter, r *http.Request) {
 		Node:     node,
 	})
 
+	// Trigger immediate forward propagation through instant connections.
+	if s.engine != nil {
+		go s.engine.PropagateFrom(r.Context(), nodeID)
+	}
+
 	writeJSON(w, http.StatusOK, node)
 }
 

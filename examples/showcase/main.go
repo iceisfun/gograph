@@ -309,7 +309,7 @@ func main() {
 		engine.WithExecutor(luaExec),
 		engine.WithEventDuration(1000),
 		engine.WithStore(st, g.ID),
-		engine.WithWireInterval(200*time.Millisecond),
+		engine.WithSourceInterval(200*time.Millisecond),
 		engine.WithNodeLogger(engine.DebugNodeLogger{}),
 		engine.WithEventLogger(engine.DebugEventLogger{}),
 	)
@@ -324,6 +324,7 @@ func main() {
 	} else {
 		opts = append(opts, server.WithStaticFS(frontend.FS()))
 	}
+	opts = append(opts, server.WithEngine(eng))
 	srv := server.New(opts...)
 
 	// Wire engine events to SSE.

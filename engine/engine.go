@@ -14,9 +14,6 @@ import (
 )
 
 // Executor runs a node's logic with the given inputs and returns outputs.
-// The config parameter carries the node's instance configuration (e.g.
-// "duration" for delay nodes). The lua package provides the primary
-// implementation.
 type Executor interface {
 	ExecuteNode(ctx context.Context, nt graph.NodeType, inputs map[string]any, config map[string]string) (map[string]any, error)
 }
@@ -25,8 +22,13 @@ type Executor interface {
 // running each node's logic via an [Executor]. Events are emitted to
 // subscribers for real-time visualization.
 //
-// Use [Start] to begin periodic execution in the background and cancel
-// the context (or call [Stop]) to shut down gracefully.
+// The engine supports two execution modes:
+//   - Timed traversals: connections with duration > 0 animate dots (EventStart/EventEnd).
+//   - Instant propagation: connections with duration = 0 propagate forward immediately
+//     when any upstream value changes. No polling — pure event-driven cascade.
+//
+// Use [Start] to begin periodic execution and [PropagateFrom] to trigger
+// immediate forward propagation from a specific node.
 type Engine struct {
 	mu          sync.RWMutex
 	graph       *graph.Graph
@@ -39,9 +41,17 @@ type Engine struct {
 	nodeLogger  NodeLogger
 	eventLogger EventLogger
 
-	// Fast wire evaluation
-	wireInterval  time.Duration
-	lastWireState sync.Map // connectionID → last emitted value string
+	// Persistent node outputs — stores the last computed outputs for every
+	// node. Downstream nodes read inputs from here so fan-in nodes (AND, etc.)
+	// always have the latest value for all inputs.
+	nodeOutputs sync.Map // nodeID → map[string]any
+
+	// Change detection for wire state and display content.
+	lastWireState sync.Map // connectionID or "nodeID:_display" → last value string
+
+	// Source evaluation interval (replaces wireInterval).
+	// Only re-evaluates source nodes and propagates forward.
+	sourceInterval time.Duration
 
 	// lifecycle
 	cancel context.CancelFunc
@@ -53,60 +63,45 @@ type EngineOption func(*Engine)
 
 // WithRegistry sets the node type registry for the engine.
 func WithRegistry(r *graph.Registry) EngineOption {
-	return func(e *Engine) {
-		e.registry = r
-	}
+	return func(e *Engine) { e.registry = r }
 }
 
 // WithExecutor sets the node executor (typically the Lua bindings).
 func WithExecutor(exec Executor) EngineOption {
-	return func(e *Engine) {
-		e.executor = exec
-	}
+	return func(e *Engine) { e.executor = exec }
 }
 
-// WithStore sets the graph store. When set, the engine reloads the graph
-// from the store before each execution to pick up changes made through
-// the REST API (e.g. node/connection edits from the frontend).
+// WithStore sets the graph store for live graph reloading.
 func WithStore(s store.GraphStore, graphID string) EngineOption {
-	return func(e *Engine) {
-		e.store = s
-		e.graphID = graphID
-	}
+	return func(e *Engine) { e.store = s; e.graphID = graphID }
 }
 
 // WithNodeLogger sets the logger for node lifecycle events.
-// Defaults to [NopNodeLogger].
 func WithNodeLogger(l NodeLogger) EngineOption {
-	return func(e *Engine) {
-		e.nodeLogger = l
-	}
+	return func(e *Engine) { e.nodeLogger = l }
 }
 
 // WithEventLogger sets the logger for event lifecycle events.
-// Defaults to [NopEventLogger].
 func WithEventLogger(l EventLogger) EngineOption {
-	return func(e *Engine) {
-		e.eventLogger = l
-	}
+	return func(e *Engine) { e.eventLogger = l }
 }
 
-// WithWireInterval sets the evaluation interval for instant (wire-type)
-// connections. These run on a fast tick independent of the main execution
-// interval, updating wire states without sleeping for traversals.
-// Defaults to 0 (disabled — wires only update during normal execution).
+// WithSourceInterval sets the evaluation interval for source nodes.
+// Source nodes (no connected inputs) are re-evaluated on this tick and
+// their outputs propagate forward through instant connections.
+func WithSourceInterval(d time.Duration) EngineOption {
+	return func(e *Engine) { e.sourceInterval = d }
+}
+
+// WithWireInterval is a deprecated alias for [WithSourceInterval].
 func WithWireInterval(d time.Duration) EngineOption {
-	return func(e *Engine) {
-		e.wireInterval = d
-	}
+	return WithSourceInterval(d)
 }
 
 // WithEventDuration sets the default animation duration in milliseconds
-// for events traversing connections. Defaults to 1000ms.
+// for timed connection traversals. Defaults to 1000ms.
 func WithEventDuration(ms int) EngineOption {
-	return func(e *Engine) {
-		e.duration = ms
-	}
+	return func(e *Engine) { e.duration = ms }
 }
 
 // New creates a new engine for the given graph.
@@ -133,10 +128,11 @@ func (e *Engine) Subscribe(bufferSize int) *Subscriber {
 	return sub
 }
 
-// Start begins periodic execution at the given interval. Each tick
-// launches a concurrent execution against the latest graph snapshot.
-// Execution stops when the context is cancelled or [Stop] is called.
-// Start returns immediately; execution runs in the background.
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+// Start begins periodic execution in the background.
 func (e *Engine) Start(ctx context.Context, interval time.Duration) {
 	ctx, e.cancel = context.WithCancel(ctx)
 
@@ -155,17 +151,18 @@ func (e *Engine) Start(ctx context.Context, interval time.Duration) {
 		}
 	})
 
-	// Fast wire evaluation loop — instant connections only, no sleeps.
-	if e.wireInterval > 0 {
+	// Source evaluation loop — re-evaluates source nodes and propagates
+	// forward through instant connections.
+	if e.sourceInterval > 0 {
 		e.wg.Go(func() {
-			ticker := time.NewTicker(e.wireInterval)
+			ticker := time.NewTicker(e.sourceInterval)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					e.evaluateWires(ctx)
+					e.evaluateSources(ctx)
 				}
 			}
 		})
@@ -181,7 +178,6 @@ func (e *Engine) Stop() {
 	e.wg.Wait()
 }
 
-// fireExecution launches a single graph execution in its own goroutine.
 func (e *Engine) fireExecution(ctx context.Context) {
 	e.wg.Go(func() {
 		if err := e.Execute(ctx); err != nil && ctx.Err() == nil {
@@ -190,19 +186,100 @@ func (e *Engine) fireExecution(ctx context.Context) {
 	})
 }
 
-// evaluateWires runs a fast pass over the graph, executing all nodes
-// but only emitting connection.state events for instant connections
-// whose values have changed. No sleeps, no timed events.
-func (e *Engine) evaluateWires(ctx context.Context) {
-	var g *graph.Graph
-	if e.store != nil {
-		var err error
-		g, err = e.store.Load(ctx, e.graphID)
+// ---------------------------------------------------------------------------
+// Forward propagation — the core of the instant wire model
+// ---------------------------------------------------------------------------
+
+// PropagateFrom immediately re-evaluates a node and propagates its outputs
+// forward through all instant connections. This is the primary mechanism
+// for binary/wire signals — no polling, pure event-driven cascade.
+//
+// Called by: server click handler, source tick, timed event arrival.
+func (e *Engine) PropagateFrom(ctx context.Context, nodeID string) {
+	g := e.loadGraph(ctx)
+	if g == nil {
+		return
+	}
+	visited := make(map[string]bool)
+	e.propagateFrom(ctx, g, nodeID, visited)
+}
+
+func (e *Engine) propagateFrom(ctx context.Context, g *graph.Graph, nodeID string, visited map[string]bool) {
+	if ctx.Err() != nil || visited[nodeID] {
+		return
+	}
+	visited[nodeID] = true
+
+	node := g.Node(nodeID)
+	if node == nil {
+		return
+	}
+	nt, ok := e.registry.Lookup(node.Type)
+	if !ok {
+		return
+	}
+
+	// Gather inputs from persistent state.
+	inputs := e.gatherPersistentInputs(g, nodeID)
+	if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
+		return
+	}
+
+	config := node.Config
+	if config == nil {
+		config = make(map[string]string)
+	}
+
+	// Execute the node.
+	var outputs map[string]any
+	var err error
+	if e.executor != nil && nt.Script != "" {
+		outputs, err = e.executor.ExecuteNode(ctx, nt, inputs, config)
 		if err != nil {
 			return
 		}
 	} else {
-		g = e.graph
+		outputs = inputs
+	}
+
+	// Handle _display with change detection.
+	e.emitDisplayIfChanged(nodeID, outputs)
+	delete(outputs, "_display")
+
+	// Store persistently.
+	e.nodeOutputs.Store(nodeID, outputs)
+
+	// Follow instant outgoing connections.
+	g.RLock()
+	var downstream []string
+	for _, c := range g.Connections {
+		if c.FromNode != nodeID {
+			continue
+		}
+		if isTimedConnection(c) {
+			continue
+		}
+		e.emitConnectionStateIfChanged(c, outputs)
+		downstream = append(downstream, c.ToNode)
+	}
+	g.RUnlock()
+
+	// Recurse into instant downstream nodes.
+	for _, nextID := range downstream {
+		e.propagateFrom(ctx, g, nextID, visited)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Source evaluation — replaces evaluateWires
+// ---------------------------------------------------------------------------
+
+// evaluateSources re-evaluates only source nodes (no connected inputs)
+// and propagates their outputs forward through instant connections.
+func (e *Engine) evaluateSources(ctx context.Context) {
+	g := e.loadGraph(ctx)
+	if g == nil {
+		return
 	}
 
 	order, err := Order(g)
@@ -210,134 +287,46 @@ func (e *Engine) evaluateWires(ctx context.Context) {
 		return
 	}
 
-	outputs := make(map[string]map[string]any)
+	visited := make(map[string]bool)
 
 	for _, nodeID := range order {
 		if ctx.Err() != nil {
 			return
 		}
 
-		node := g.Node(nodeID)
-		if node == nil {
-			continue
-		}
-		nt, ok := e.registry.Lookup(node.Type)
+		nt, ok := e.registry.Lookup(func() string {
+			n := g.Node(nodeID)
+			if n == nil {
+				return ""
+			}
+			return n.Type
+		}())
 		if !ok {
 			continue
 		}
 
-		inputs := e.gatherInputs(g, nodeID, outputs)
-		if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
+		// Only evaluate source nodes: those with no input slots or no
+		// connected inputs.
+		if len(nt.InputSlots()) > 0 && e.hasConnectedInputs(g, nodeID) {
 			continue
 		}
 
-		config := node.Config
-		if config == nil {
-			config = make(map[string]string)
-		}
-
-		var nodeOutputs map[string]any
-		if e.executor != nil && nt.Script != "" {
-			nodeOutputs, err = e.executor.ExecuteNode(ctx, nt, inputs, config)
-			if err != nil {
-				continue
-			}
-		} else {
-			nodeOutputs = inputs
-		}
-
-		// Emit display content on change.
-		if display, ok := nodeOutputs["_display"]; ok {
-			if text, ok := display.(string); ok {
-				key := nodeID + ":_display"
-				if prev, loaded := e.lastWireState.Load(key); !loaded || prev.(string) != text {
-					e.lastWireState.Store(key, text)
-					e.emit(Event{
-						Type: graph.TypeNodeContent,
-						Payload: graph.NodeContentPayload{
-							Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
-							NodeID:   nodeID,
-							Text:     text,
-						},
-					})
-				}
-			}
-			delete(nodeOutputs, "_display")
-		}
-		outputs[nodeID] = nodeOutputs
-
-		// Emit connection.state for instant connections, only on change.
-		g.RLock()
-		for _, c := range g.Connections {
-			if c.FromNode != nodeID {
-				continue
-			}
-			// Only process instant connections.
-			if c.Config != nil {
-				if d, ok := c.Config["duration"]; ok {
-					if ms, parseErr := strconv.Atoi(d); parseErr == nil && ms > 0 {
-						continue
-					}
-				}
-			}
-
-			val := ""
-			if v, ok := nodeOutputs[c.FromSlot]; ok {
-				val = fmt.Sprintf("%v", v)
-			}
-
-			// Change detection — skip if value unchanged.
-			if prev, loaded := e.lastWireState.Load(c.ID); loaded && prev.(string) == val {
-				continue
-			}
-			e.lastWireState.Store(c.ID, val)
-
-			active := val != "" && val != "0" && val != "false" && val != "off" && val != "<nil>"
-			e.emit(Event{
-				Type: graph.TypeConnectionState,
-				Payload: graph.ConnectionStatePayload{
-					Envelope:     graph.NewEnvelope(time.Now().UnixMilli()),
-					ConnectionID: c.ID,
-					Active:       active,
-					Value:        val,
-				},
-			})
-		}
-		g.RUnlock()
+		// Execute and propagate forward.
+		e.propagateFrom(ctx, g, nodeID, visited)
 	}
 }
 
-// emit sends an event to all active subscribers.
-func (e *Engine) emit(evt Event) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	for _, sub := range e.subscribers {
-		sub.send(evt)
-	}
-}
+// ---------------------------------------------------------------------------
+// Full timed execution
+// ---------------------------------------------------------------------------
 
-// Execute runs the graph in topological order. For each node:
-// 1. Gather input values from upstream connections
-// 2. Execute the node's logic via the Executor
-// 3. Emit EventStart on each outgoing connection
-// 4. Store outputs for downstream nodes
-//
-// Returns an error if the graph has cycles, a node type is missing, or
-// execution fails.
-// Execute runs the graph in topological order. It is safe to call
-// concurrently — each invocation works with its own graph snapshot
-// and local state, so multiple executions can overlap.
+// Execute runs the full graph in topological order, handling timed
+// connection traversals with sleep. After each node executes, instant
+// downstream connections propagate forward immediately.
 func (e *Engine) Execute(ctx context.Context) error {
-	// Load a snapshot of the graph for this execution.
-	var g *graph.Graph
-	if e.store != nil {
-		var err error
-		g, err = e.store.Load(ctx, e.graphID)
-		if err != nil {
-			return fmt.Errorf("load graph: %w", err)
-		}
-	} else {
-		g = e.graph
+	g := e.loadGraph(ctx)
+	if g == nil {
+		return fmt.Errorf("failed to load graph")
 	}
 
 	order, err := Order(g)
@@ -345,10 +334,8 @@ func (e *Engine) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// outputs tracks the output values of each node, keyed by node ID then slot ID.
+	// Local outputs for timed traversal flow within this execution.
 	outputs := make(map[string]map[string]any)
-	// emitTimes tracks when each node emitted its outgoing events, so
-	// downstream nodes can wait for traversal to complete.
 	emitTimes := make(map[string]time.Time)
 
 	for _, nodeID := range order {
@@ -367,21 +354,18 @@ func (e *Engine) Execute(ctx context.Context) error {
 			return fmt.Errorf("node %q: unknown type %q", nodeID, node.Type)
 		}
 
-		// Gather inputs from upstream connections.
+		// Gather inputs from the local execution-scoped map.
 		inputs := e.gatherInputs(g, nodeID, outputs)
-
-		// Skip nodes that expect inputs but have none connected.
 		if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
 			e.nodeLogger.NodeSkipped(nodeID, "has input slots but no incoming connections")
 			continue
 		}
 
-		// Wait for incoming traversals to complete.
+		// Wait for incoming timed traversals.
 		if waitErr := e.waitForArrivals(ctx, g, nodeID, emitTimes); waitErr != nil {
 			return waitErr
 		}
 
-		// Execute the node.
 		config := node.Config
 		if config == nil {
 			config = make(map[string]string)
@@ -399,7 +383,7 @@ func (e *Engine) Execute(ctx context.Context) error {
 			nodeOutputs = inputs
 		}
 
-		// Emit display content if the script returned a _display key.
+		// Handle _display.
 		if display, ok := nodeOutputs["_display"]; ok {
 			if text, ok := display.(string); ok {
 				e.emit(Event{
@@ -415,14 +399,13 @@ func (e *Engine) Execute(ctx context.Context) error {
 		}
 
 		outputs[nodeID] = nodeOutputs
+		e.nodeOutputs.Store(nodeID, nodeOutputs) // persist for propagation
 		e.nodeLogger.NodeExecuted(nodeID, node.Type, len(nodeOutputs))
 
-		// If the node has a duration config (e.g. delay nodes), wait before
-		// emitting outgoing events. This creates the actual hold time.
+		// Node hold (delay nodes).
 		if d, ok := config["duration"]; ok {
 			if ms, parseErr := strconv.Atoi(d); parseErr == nil && ms > 0 {
 				e.nodeLogger.NodeHolding(nodeID, ms)
-				// Notify frontend so the node glows during the hold.
 				e.emit(Event{
 					Type: graph.TypeNodeActive,
 					Payload: graph.NodeActivePayload{
@@ -440,21 +423,202 @@ func (e *Engine) Execute(ctx context.Context) error {
 			}
 		}
 
-		// Log disconnected output slots.
 		e.logDisconnectedOutputs(g, nodeID, nt)
 
-		// Emit events on outgoing connections and record the emit time.
-		e.emitNodeOutputEvents(g, nodeID, nodeOutputs)
+		// Emit timed events and propagate instant connections forward.
+		e.emitTimedAndPropagateInstant(ctx, g, nodeID, nodeOutputs)
 		emitTimes[nodeID] = time.Now()
 	}
 
 	return nil
 }
 
-// waitForArrivals waits until all incoming connection traversals have
-// completed. For each incoming connection, we compute when the upstream
-// node emitted plus the connection's traversal duration, and sleep until
-// the latest arrival time.
+// emitTimedAndPropagateInstant handles outgoing connections after a node
+// executes in the full Execute cycle. Timed connections get EventStart/EventEnd.
+// Instant connections propagate forward immediately via propagateFrom.
+func (e *Engine) emitTimedAndPropagateInstant(ctx context.Context, g *graph.Graph, nodeID string, outputs map[string]any) {
+	g.RLock()
+	var timedConns []*graph.Connection
+	var instantDownstream []string
+	for _, c := range g.Connections {
+		if c.FromNode != nodeID {
+			continue
+		}
+		if isTimedConnection(c) {
+			timedConns = append(timedConns, c)
+		} else {
+			e.emitConnectionStateIfChanged(c, outputs)
+			instantDownstream = append(instantDownstream, c.ToNode)
+		}
+	}
+	g.RUnlock()
+
+	// Emit timed events.
+	now := time.Now().UnixMilli()
+	for _, c := range timedConns {
+		eventID := generateEventID()
+		e.eventLogger.EventEmitted(eventID, c.ID, nodeID, c.ToNode, connDuration(c))
+		e.emit(Event{
+			Type: graph.TypeEventStart,
+			Payload: graph.EventStartPayload{
+				Envelope:     graph.NewEnvelope(now),
+				EventID:      eventID,
+				ConnectionID: c.ID,
+				Duration:     connDuration(c),
+			},
+		})
+		go func(eid, connID, toNode string, dur int) {
+			time.Sleep(time.Duration(dur) * time.Millisecond)
+			e.eventLogger.EventArrived(eid, connID, toNode)
+			e.emit(Event{
+				Type: graph.TypeEventEnd,
+				Payload: graph.EventEndPayload{
+					Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
+					EventID:  eid,
+				},
+			})
+		}(eventID, c.ID, c.ToNode, connDuration(c))
+	}
+
+	// Propagate instant downstream.
+	visited := make(map[string]bool)
+	visited[nodeID] = true
+	for _, nextID := range instantDownstream {
+		e.propagateFrom(ctx, g, nextID, visited)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func (e *Engine) emit(evt Event) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, sub := range e.subscribers {
+		sub.send(evt)
+	}
+}
+
+func (e *Engine) loadGraph(ctx context.Context) *graph.Graph {
+	if e.store != nil {
+		g, err := e.store.Load(ctx, e.graphID)
+		if err != nil {
+			return nil
+		}
+		return g
+	}
+	return e.graph
+}
+
+// gatherInputs reads from a local execution-scoped outputs map (for Execute).
+func (e *Engine) gatherInputs(g *graph.Graph, nodeID string, outputs map[string]map[string]any) map[string]any {
+	g.RLock()
+	defer g.RUnlock()
+	inputs := make(map[string]any)
+	for _, c := range g.Connections {
+		if c.ToNode == nodeID {
+			if nodeOut, ok := outputs[c.FromNode]; ok {
+				if val, ok := nodeOut[c.FromSlot]; ok {
+					inputs[c.ToSlot] = val
+				}
+			}
+		}
+	}
+	return inputs
+}
+
+// gatherPersistentInputs reads from the persistent nodeOutputs map (for propagation).
+func (e *Engine) gatherPersistentInputs(g *graph.Graph, nodeID string) map[string]any {
+	g.RLock()
+	defer g.RUnlock()
+	inputs := make(map[string]any)
+	for _, c := range g.Connections {
+		if c.ToNode == nodeID {
+			if stored, ok := e.nodeOutputs.Load(c.FromNode); ok {
+				nodeOut := stored.(map[string]any)
+				if val, ok := nodeOut[c.FromSlot]; ok {
+					inputs[c.ToSlot] = val
+				}
+			}
+		}
+	}
+	return inputs
+}
+
+func (e *Engine) hasConnectedInputs(g *graph.Graph, nodeID string) bool {
+	g.RLock()
+	defer g.RUnlock()
+	for _, c := range g.Connections {
+		if c.ToNode == nodeID {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) emitDisplayIfChanged(nodeID string, outputs map[string]any) {
+	display, ok := outputs["_display"]
+	if !ok {
+		return
+	}
+	text, ok := display.(string)
+	if !ok {
+		return
+	}
+	key := nodeID + ":_display"
+	if prev, loaded := e.lastWireState.Load(key); loaded && prev.(string) == text {
+		return
+	}
+	e.lastWireState.Store(key, text)
+	e.emit(Event{
+		Type: graph.TypeNodeContent,
+		Payload: graph.NodeContentPayload{
+			Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
+			NodeID:   nodeID,
+			Text:     text,
+		},
+	})
+}
+
+func (e *Engine) emitConnectionStateIfChanged(c *graph.Connection, outputs map[string]any) {
+	val := ""
+	if v, ok := outputs[c.FromSlot]; ok {
+		val = fmt.Sprintf("%v", v)
+	}
+	if prev, loaded := e.lastWireState.Load(c.ID); loaded && prev.(string) == val {
+		return
+	}
+	e.lastWireState.Store(c.ID, val)
+	active := val != "" && val != "0" && val != "false" && val != "off" && val != "<nil>"
+	e.emit(Event{
+		Type: graph.TypeConnectionState,
+		Payload: graph.ConnectionStatePayload{
+			Envelope:     graph.NewEnvelope(time.Now().UnixMilli()),
+			ConnectionID: c.ID,
+			Active:       active,
+			Value:        val,
+		},
+	})
+}
+
+func (e *Engine) logDisconnectedOutputs(g *graph.Graph, nodeID string, nt graph.NodeType) {
+	g.RLock()
+	defer g.RUnlock()
+	for _, slot := range nt.OutputSlots() {
+		connected := false
+		for _, c := range g.Connections {
+			if c.FromNode == nodeID && c.FromSlot == slot.ID {
+				connected = true
+				break
+			}
+		}
+		if !connected {
+			e.nodeLogger.NodeDisconnected(nodeID, slot.ID)
+		}
+	}
+}
+
 func (e *Engine) waitForArrivals(ctx context.Context, g *graph.Graph, nodeID string, emitTimes map[string]time.Time) error {
 	g.RLock()
 	var latestArrival time.Time
@@ -466,15 +630,7 @@ func (e *Engine) waitForArrivals(ctx context.Context, g *graph.Graph, nodeID str
 		if !ok {
 			continue
 		}
-		duration := 0
-		if c.Config != nil {
-			if d, ok := c.Config["duration"]; ok {
-				if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
-					duration = ms
-				}
-			}
-		}
-		arrival := emitTime.Add(time.Duration(duration) * time.Millisecond)
+		arrival := emitTime.Add(time.Duration(connDuration(c)) * time.Millisecond)
 		if arrival.After(latestArrival) {
 			latestArrival = arrival
 		}
@@ -496,120 +652,6 @@ func (e *Engine) waitForArrivals(ctx context.Context, g *graph.Graph, nodeID str
 	return nil
 }
 
-// gatherInputs collects values from upstream connections for a given node.
-func (e *Engine) gatherInputs(g *graph.Graph, nodeID string, outputs map[string]map[string]any) map[string]any {
-	g.RLock()
-	defer g.RUnlock()
-
-	inputs := make(map[string]any)
-	for _, c := range g.Connections {
-		if c.ToNode == nodeID {
-			if nodeOut, ok := outputs[c.FromNode]; ok {
-				if val, ok := nodeOut[c.FromSlot]; ok {
-					inputs[c.ToSlot] = val
-				}
-			}
-		}
-	}
-	return inputs
-}
-
-// logDisconnectedOutputs logs output slots that have no outgoing connections.
-func (e *Engine) logDisconnectedOutputs(g *graph.Graph, nodeID string, nt graph.NodeType) {
-	g.RLock()
-	defer g.RUnlock()
-
-	for _, slot := range nt.OutputSlots() {
-		connected := false
-		for _, c := range g.Connections {
-			if c.FromNode == nodeID && c.FromSlot == slot.ID {
-				connected = true
-				break
-			}
-		}
-		if !connected {
-			e.nodeLogger.NodeDisconnected(nodeID, slot.ID)
-		}
-	}
-}
-
-// emitNodeOutputEvents emits events for each outgoing connection.
-// Timed connections (duration > 0) get EventStart + scheduled EventEnd.
-// Instant connections (duration = 0) get a ConnectionState event carrying
-// the current value — these represent continuous wire state, not pulses.
-func (e *Engine) emitNodeOutputEvents(g *graph.Graph, nodeID string, outputs map[string]any) {
-	g.RLock()
-	connections := make([]*graph.Connection, 0)
-	for _, c := range g.Connections {
-		if c.FromNode == nodeID {
-			connections = append(connections, c)
-		}
-	}
-	g.RUnlock()
-
-	now := time.Now().UnixMilli()
-	for _, c := range connections {
-		// Per-connection traversal duration.
-		duration := 0
-		if c.Config != nil {
-			if d, ok := c.Config["duration"]; ok {
-				if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
-					duration = ms
-				}
-			}
-		}
-
-		if duration > 0 {
-			// Timed: animate a dot traversing the connection.
-			eventID := generateEventID()
-			e.eventLogger.EventEmitted(eventID, c.ID, nodeID, c.ToNode, duration)
-			e.emit(Event{
-				Type: graph.TypeEventStart,
-				Payload: graph.EventStartPayload{
-					Envelope:     graph.NewEnvelope(now),
-					EventID:      eventID,
-					ConnectionID: c.ID,
-					Duration:     duration,
-				},
-			})
-			go func(eid string, connID string, toNode string, dur int) {
-				time.Sleep(time.Duration(dur) * time.Millisecond)
-				e.eventLogger.EventArrived(eid, connID, toNode)
-				e.emit(Event{
-					Type: graph.TypeEventEnd,
-					Payload: graph.EventEndPayload{
-						Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
-						EventID:  eid,
-					},
-				})
-			}(eventID, c.ID, c.ToNode, duration)
-		} else {
-			// Instant: emit steady state for this wire (with change detection).
-			val := ""
-			if v, ok := outputs[c.FromSlot]; ok {
-				val = fmt.Sprintf("%v", v)
-			}
-			if prev, loaded := e.lastWireState.Load(c.ID); loaded && prev.(string) == val {
-				continue
-			}
-			e.lastWireState.Store(c.ID, val)
-			active := val != "" && val != "0" && val != "false" && val != "off" && val != "<nil>"
-			e.eventLogger.EventEmitted("", c.ID, nodeID, c.ToNode, 0)
-			e.emit(Event{
-				Type: graph.TypeConnectionState,
-				Payload: graph.ConnectionStatePayload{
-					Envelope:     graph.NewEnvelope(now),
-					ConnectionID: c.ID,
-					Active:       active,
-					Value:        val,
-				},
-			})
-		}
-	}
-}
-
-// cancelAll emits cancel events for all in-flight events. Called when
-// execution is interrupted by context cancellation.
 func (e *Engine) cancelAll() {
 	e.eventLogger.EventCancelled("context cancelled")
 	e.emit(Event{
@@ -622,7 +664,29 @@ func (e *Engine) cancelAll() {
 	})
 }
 
-// generateEventID creates a short random event identifier.
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
+func isTimedConnection(c *graph.Connection) bool {
+	return connDuration(c) > 0
+}
+
+func connDuration(c *graph.Connection) int {
+	if c.Config == nil {
+		return 0
+	}
+	d, ok := c.Config["duration"]
+	if !ok {
+		return 0
+	}
+	ms, err := strconv.Atoi(d)
+	if err != nil || ms <= 0 {
+		return 0
+	}
+	return ms
+}
+
 func generateEventID() string {
 	var buf [8]byte
 	rand.Read(buf[:])

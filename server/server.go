@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iceisfun/gograph/engine"
 	"github.com/iceisfun/gograph/graph"
 	"github.com/iceisfun/gograph/store"
 )
@@ -19,6 +20,7 @@ type Server struct {
 	store    store.GraphStore
 	registry *graph.Registry
 	broker   *sseBroker
+	engine   *engine.Engine
 	staticFS fs.FS
 	prefix   string
 }
@@ -52,6 +54,14 @@ func WithStore(st store.GraphStore) Option {
 func WithRegistry(r *graph.Registry) Option {
 	return func(s *Server) {
 		s.registry = r
+	}
+}
+
+// WithEngine sets the execution engine. When set, node clicks trigger
+// immediate forward propagation through instant connections.
+func WithEngine(eng *engine.Engine) Option {
+	return func(s *Server) {
+		s.engine = eng
 	}
 }
 
