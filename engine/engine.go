@@ -143,6 +143,19 @@ func (e *Engine) Execute(ctx context.Context) error {
 
 		outputs[nodeID] = nodeOutputs
 
+		// If the node has a duration config (e.g. delay nodes), wait before
+		// emitting outgoing events. This creates the actual hold time.
+		if d, ok := config["duration"]; ok {
+			if ms, parseErr := strconv.Atoi(d); parseErr == nil && ms > 0 {
+				select {
+				case <-ctx.Done():
+					e.cancelAll()
+					return ctx.Err()
+				case <-time.After(time.Duration(ms) * time.Millisecond):
+				}
+			}
+		}
+
 		// Emit events on outgoing connections.
 		// Per-node duration override via config["duration"].
 		e.emitNodeOutputEvents(nodeID, config)
