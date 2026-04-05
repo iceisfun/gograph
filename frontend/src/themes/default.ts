@@ -79,8 +79,8 @@ export const defaultTheme: Theme = {
     nodeShakeIntensity: 3,
 
     // Node glow (delay/buffer holding)
-    nodeGlowColor: 'rgba(160, 144, 32, 0.7)',
-    nodeGlowRadius: 18,
+    nodeGlowColor: 'rgba(160, 144, 32, 0.85)',
+    nodeGlowRadius: 28,
 
     // Compatible slot glow (during connection drag)
     slotCompatibleGlow: 'rgba(15, 155, 142, 0.8)',
