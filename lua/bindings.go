@@ -72,6 +72,10 @@ func (b *Bindings) ExecuteNode(ctx context.Context, nt graph.NodeType, inputs ma
 			MaxStackSlots:   10000,
 		}),
 	)
+
+	// Set providers BEFORE stdlib.Open — stdlib only registers modules
+	// for providers that are already set.
+	v.SetTimeProvider(vm.NewDefaultTimeProvider())
 	stdlib.Open(v)
 
 	// Set the inputs global.
@@ -84,9 +88,6 @@ func (b *Bindings) ExecuteNode(ctx context.Context, nt graph.NodeType, inputs ma
 		configTable.SetString(k, vm.NewString(val))
 	}
 	v.SetGlobal("config", vm.NewTable(configTable))
-
-	// Enable the time provider so scripts can use time.now(), time.tick(), etc.
-	v.SetTimeProvider(vm.NewDefaultTimeProvider())
 
 	// Run the script.
 	results, err := v.Run(proto)
