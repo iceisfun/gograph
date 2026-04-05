@@ -100,4 +100,8 @@ export const defaultTheme: Theme = {
     // Node content area
     nodeContentFont: '11px monospace',
     nodeContentText: '#cccccc',
+
+    // Interactive node colors
+    nodeInteractiveOnColor: '#2ecc71',
+    nodeInteractiveOffColor: '#e74c3c',
 };

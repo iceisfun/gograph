@@ -94,4 +94,8 @@ export interface Theme {
     // Node content area
     nodeContentFont: string;
     nodeContentText: string;
+
+    // Interactive node colors
+    nodeInteractiveOnColor: string;
+    nodeInteractiveOffColor: string;
 }

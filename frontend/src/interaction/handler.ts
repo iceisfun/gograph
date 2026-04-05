@@ -126,6 +126,42 @@ export class InteractionHandler {
         // Check node hit
         const nodeHit = hitTestNode(worldPos, this.store);
         if (nodeHit) {
+            // Check for interactive node click in content area
+            const clickGraph = this.store.graph.current;
+            const clickedNode = clickGraph?.nodes[nodeHit];
+            if (clickedNode && clickGraph) {
+                const clickedType = this.store.graph.getNodeType(clickedNode.type);
+                if (clickedType?.interactive && clickedType.contentHeight) {
+                    const clickBounds = this.store.graph.getCachedNodeBounds(nodeHit);
+                    if (clickBounds) {
+                        // Compute content area Y
+                        const clickSlotLayouts = this.store.graph.getSlotLayouts(nodeHit);
+                        let clickLeftCount = 0, clickRightCount = 0;
+                        if (clickSlotLayouts) {
+                            for (const sl of clickSlotLayouts.values()) {
+                                if (sl.side === 'left') clickLeftCount++;
+                                else if (sl.side === 'right') clickRightCount++;
+                            }
+                        }
+                        const clickSlotsH = 24 * Math.max(clickLeftCount, clickRightCount, 1); // SLOT_SPACING
+                        const clickContentY = clickBounds.y + 28 + clickSlotsH; // NODE_TITLE_HEIGHT
+
+                        if (worldPos.y >= clickContentY) {
+                            // Click in content area of interactive node — toggle
+                            this.store.animation.shakeNode(nodeHit);
+                            void this.api.clickNode(clickGraph.id, nodeHit).then(updatedNode => {
+                                if (this.store.graph.current) {
+                                    this.store.graph.current.nodes[nodeHit] = updatedNode;
+                                }
+                            }).catch(err => {
+                                console.error('Failed to click node:', err);
+                            });
+                            return;
+                        }
+                    }
+                }
+            }
+
             handleClick(worldPos, this.store, e.shiftKey);
 
             if (e.shiftKey) {

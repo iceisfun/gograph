@@ -74,4 +74,10 @@ export class ApiClient {
             method: 'POST',
         });
     }
+
+    async clickNode(graphId: string, nodeId: string): Promise<Node> {
+        return this.request<Node>(`/graphs/${graphId}/nodes/${nodeId}/click`, {
+            method: 'POST',
+        });
+    }
 }

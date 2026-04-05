@@ -288,5 +288,46 @@ export function drawNodes(
             ctx.fillText(content.text, bounds.x + 8, contentY + 6);
             ctx.restore();
         }
+
+        // Interactive node button
+        if (nodeType?.interactive && contentH > 0) {
+            const slotLayouts2 = store.graph.getSlotLayouts(node.id);
+            let lc2 = 0, rc2 = 0;
+            if (slotLayouts2) {
+                for (const sl of slotLayouts2.values()) {
+                    if (sl.side === 'left') lc2++;
+                    else if (sl.side === 'right') rc2++;
+                }
+            }
+            const slotsH2 = SLOT_SPACING * Math.max(lc2, rc2, 1);
+            const interactiveY = bounds.y + NODE_TITLE_HEIGHT + slotsH2;
+
+            const state = node.config?.state || 'off';
+            const isOn = state === 'on';
+
+            // Draw pill button centered in content area
+            const btnW = 60;
+            const btnH = 22;
+            const btnR = btnH / 2;
+            const btnX = bounds.x + bounds.width / 2 - btnW / 2;
+            const btnY = interactiveY + (contentH - btnH) / 2;
+
+            ctx.beginPath();
+            ctx.moveTo(btnX + btnR, btnY);
+            ctx.lineTo(btnX + btnW - btnR, btnY);
+            ctx.arc(btnX + btnW - btnR, btnY + btnR, btnR, -Math.PI / 2, Math.PI / 2);
+            ctx.lineTo(btnX + btnR, btnY + btnH);
+            ctx.arc(btnX + btnR, btnY + btnR, btnR, Math.PI / 2, -Math.PI / 2);
+            ctx.closePath();
+            ctx.fillStyle = isOn ? theme.nodeInteractiveOnColor : theme.nodeInteractiveOffColor;
+            ctx.fill();
+
+            // Button label
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '11px bold sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(isOn ? 'ON' : 'OFF', bounds.x + bounds.width / 2, btnY + btnR);
+        }
     }
 }

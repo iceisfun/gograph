@@ -42,4 +42,5 @@ export interface NodeType {
     scriptName?: string;
     category?: string;
     contentHeight?: number;
+    interactive?: boolean;
 }
