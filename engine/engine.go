@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"strconv"
 	"sync"
 	"time"
@@ -184,6 +185,9 @@ func (e *Engine) Execute(ctx context.Context) error {
 			}
 		}
 
+		// Log disconnected output slots.
+		e.logDisconnectedOutputs(nodeID, nt)
+
 		// Emit events on outgoing connections.
 		// Per-node duration override via config["duration"].
 		e.emitNodeOutputEvents(nodeID, config)
@@ -208,6 +212,25 @@ func (e *Engine) gatherInputs(nodeID string, outputs map[string]map[string]any) 
 		}
 	}
 	return inputs
+}
+
+// logDisconnectedOutputs logs output slots that have no outgoing connections.
+func (e *Engine) logDisconnectedOutputs(nodeID string, nt graph.NodeType) {
+	e.graph.RLock()
+	defer e.graph.RUnlock()
+
+	for _, slot := range nt.OutputSlots() {
+		connected := false
+		for _, c := range e.graph.Connections {
+			if c.FromNode == nodeID && c.FromSlot == slot.ID {
+				connected = true
+				break
+			}
+		}
+		if !connected {
+			log.Printf("node %q: output %q not connected", nodeID, slot.ID)
+		}
+	}
 }
 
 // emitNodeOutputEvents emits EventStart for each outgoing connection from the node.
