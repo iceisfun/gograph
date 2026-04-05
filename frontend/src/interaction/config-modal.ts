@@ -4,6 +4,7 @@ export class ConfigModal {
     private overlay: HTMLDivElement;
     private modal: HTMLDivElement;
     private boundEscape: (e: KeyboardEvent) => void;
+    visible = false;
 
     constructor(container: HTMLElement) {
         this.overlay = document.createElement('div');
@@ -137,6 +138,7 @@ export class ConfigModal {
         this.modal.appendChild(buttons);
 
         this.overlay.style.display = 'flex';
+        this.visible = true;
         document.addEventListener('keydown', this.boundEscape);
 
         // Focus first input
@@ -146,6 +148,7 @@ export class ConfigModal {
 
     hide(): void {
         this.overlay.style.display = 'none';
+        this.visible = false;
         document.removeEventListener('keydown', this.boundEscape);
     }
 }

@@ -4,4 +4,6 @@ local hex = {}
 for i = 1, #data do
     hex[#hex + 1] = string.format("%02x", string.byte(data, i))
 end
-return { out = table.concat(hex, " ") }
+local result = table.concat(hex, " ")
+print("[hexdump] " .. result)
+return {}

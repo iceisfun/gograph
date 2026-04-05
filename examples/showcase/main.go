@@ -76,6 +76,15 @@ func main() {
 		Script: mustReadFile("scripts/hexdump.lua"),
 	}))
 	must(reg.Register(graph.NodeType{
+		Name:     "print",
+		Label:    "Print",
+		Category: "output",
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/print.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
 		Name:     "delay",
 		Label:    "Delay",
 		Category: "delay",
@@ -90,9 +99,9 @@ func main() {
 	//
 	//   src1 ("Hello, World!") --> lower --> delay1 (500ms) --> hex1
 	//        |
-	//        +--> reverse --> hex2
+	//        +--> reverse --> print1
 	//
-	//   src2 ("GoGraph!") --> delay2 (1500ms) --> reverse2 --> hex3
+	//   src2 ("GoGraph!") --> delay2 (1500ms) --> reverse2 --> hex2
 	//
 	g := graph.NewGraph("showcase")
 
@@ -102,25 +111,25 @@ func main() {
 	must(g.AddNode(&graph.Node{ID: "delay1", Type: "delay", Label: "Delay 500ms", Position: graph.Position{X: 620, Y: 80}, Config: map[string]string{"duration": "500"}}))
 	must(g.AddNode(&graph.Node{ID: "hex1", Type: "hexdump", Label: "Hex Dump", Position: graph.Position{X: 890, Y: 80}}))
 
-	// Row 2: src1 -> reverse -> hex2
+	// Row 2: src1 -> reverse -> print1
 	must(g.AddNode(&graph.Node{ID: "reverse", Type: "reverse", Label: "Reverse", Position: graph.Position{X: 350, Y: 280}}))
-	must(g.AddNode(&graph.Node{ID: "hex2", Type: "hexdump", Label: "Hex Dump", Position: graph.Position{X: 620, Y: 280}}))
+	must(g.AddNode(&graph.Node{ID: "print1", Type: "print", Label: "Print", Position: graph.Position{X: 620, Y: 280}}))
 
-	// Row 3: src2 -> delay2 -> reverse2 -> hex3
+	// Row 3: src2 -> delay2 -> reverse2 -> hex2
 	must(g.AddNode(&graph.Node{ID: "src2", Type: "source2", Label: "GoGraph!", Position: graph.Position{X: 80, Y: 420}}))
 	must(g.AddNode(&graph.Node{ID: "delay2", Type: "delay", Label: "Delay 1500ms", Position: graph.Position{X: 350, Y: 420}, Config: map[string]string{"duration": "1500"}}))
 	must(g.AddNode(&graph.Node{ID: "reverse2", Type: "reverse", Label: "Reverse", Position: graph.Position{X: 620, Y: 420}}))
-	must(g.AddNode(&graph.Node{ID: "hex3", Type: "hexdump", Label: "Hex Dump", Position: graph.Position{X: 890, Y: 420}}))
+	must(g.AddNode(&graph.Node{ID: "hex2", Type: "hexdump", Label: "Hex Dump", Position: graph.Position{X: 890, Y: 420}}))
 
 	// Wire connections.
 	must(g.Connect(&graph.Connection{ID: "c1", FromNode: "src1", FromSlot: "out", ToNode: "lower", ToSlot: "in"}))
 	must(g.Connect(&graph.Connection{ID: "c2", FromNode: "lower", FromSlot: "out", ToNode: "delay1", ToSlot: "in"}))
 	must(g.Connect(&graph.Connection{ID: "c3", FromNode: "delay1", FromSlot: "out", ToNode: "hex1", ToSlot: "in"}))
 	must(g.Connect(&graph.Connection{ID: "c4", FromNode: "src1", FromSlot: "out", ToNode: "reverse", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c5", FromNode: "reverse", FromSlot: "out", ToNode: "hex2", ToSlot: "in"}))
+	must(g.Connect(&graph.Connection{ID: "c5", FromNode: "reverse", FromSlot: "out", ToNode: "print1", ToSlot: "in"}))
 	must(g.Connect(&graph.Connection{ID: "c6", FromNode: "src2", FromSlot: "out", ToNode: "delay2", ToSlot: "in"}))
 	must(g.Connect(&graph.Connection{ID: "c7", FromNode: "delay2", FromSlot: "out", ToNode: "reverse2", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c8", FromNode: "reverse2", FromSlot: "out", ToNode: "hex3", ToSlot: "in"}))
+	must(g.Connect(&graph.Connection{ID: "c8", FromNode: "reverse2", FromSlot: "out", ToNode: "hex2", ToSlot: "in"}))
 
 	// Persist.
 	st := store.NewMemoryStore()

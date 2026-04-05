@@ -35,10 +35,11 @@ async function main() {
             onConnectionUpdate: (p) => { store.graph.updateConnection(p.connection); },
             onEventStart: (p) => {
                 store.animation.startEvent(p);
-                // Activate the source node border animation
+                // Activate the source node border animation + shake
                 const conn = store.graph.getConnection(p.connectionID);
                 if (conn) {
                     store.animation.activateNode(conn.fromNode, p.duration);
+                    store.animation.shakeNode(conn.fromNode);
                 }
             },
             onEventUpdate: (p) => { store.animation.updateEvent(p); },

@@ -226,6 +226,9 @@ export class InteractionHandler {
     }
 
     private onKeyDown(e: KeyboardEvent): void {
+        // Don't process shortcuts when modal is open
+        if (this.configModal.visible) return;
+
         // Delete selected nodes/connections
         if (e.key === 'Delete' || e.key === 'Backspace') {
             if (this.store.interaction.mode !== 'edit') return;
