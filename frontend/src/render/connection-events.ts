@@ -14,7 +14,9 @@ export function drawConnectionEvents(
 
         const from = store.graph.getSlotPosition(conn.fromNode, conn.fromSlot);
         const to = store.graph.getSlotPosition(conn.toNode, conn.toSlot);
-        const [cp1, cp2] = computeControlPoints(from, to);
+        const fromDir = store.graph.getSlotDirection(conn.fromNode, conn.fromSlot);
+        const toDir = store.graph.getSlotDirection(conn.toNode, conn.toSlot);
+        const [cp1, cp2] = computeControlPoints(from, to, fromDir, toDir);
 
         // Draw trail (several dots behind the main dot)
         const trailCount = 5;

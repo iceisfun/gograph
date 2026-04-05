@@ -14,7 +14,9 @@ export function drawConnections(
     for (const conn of graph.connections) {
         const from = store.graph.getSlotPosition(conn.fromNode, conn.fromSlot);
         const to = store.graph.getSlotPosition(conn.toNode, conn.toSlot);
-        const [cp1, cp2] = computeControlPoints(from, to);
+        const fromDir = store.graph.getSlotDirection(conn.fromNode, conn.fromSlot);
+        const toDir = store.graph.getSlotDirection(conn.toNode, conn.toSlot);
+        const [cp1, cp2] = computeControlPoints(from, to, fromDir, toDir);
 
         const isSelected = store.interaction.selectedConnections.has(conn.id);
         const isHovered = store.interaction.hoveredConnection === conn.id;
@@ -58,8 +60,11 @@ export function drawConnections(
     const drag = store.interaction.dragState;
     if (drag && drag.type === 'connection') {
         const from = store.graph.getSlotPosition(drag.fromNode, drag.fromSlot);
+        const fromDir = store.graph.getSlotDirection(drag.fromNode, drag.fromSlot);
         const to = drag.currentPos;
-        const [cp1, cp2] = computeControlPoints(from, to);
+        // Guess toDir: opposite of fromDir for visual consistency
+        const toDir = { x: -fromDir.x, y: -fromDir.y };
+        const [cp1, cp2] = computeControlPoints(from, to, fromDir, toDir);
 
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);

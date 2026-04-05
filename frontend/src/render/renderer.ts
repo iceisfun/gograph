@@ -65,6 +65,9 @@ export class Renderer {
         // 1. Resize canvas to match container (handle DPR)
         this.handleResize();
 
+        // 1.5. Recompute layout cache for this frame
+        store.graph.computeLayout();
+
         // 2. Clear
         ctx.clearRect(0, 0, this._canvasWidth, this._canvasHeight);
 

@@ -4,13 +4,7 @@ import type { AppStore } from '../state/store.js';
 import { getNodeBounds } from '../render/nodes.js';
 import { rectContains } from '../core/geometry.js';
 import { computeControlPoints, bezierPoint } from '../core/bezier.js';
-import {
-    SLOT_RADIUS,
-    NODE_TITLE_HEIGHT,
-    SLOT_SPACING,
-    SLOT_OFFSET_X,
-    NODE_WIDTH,
-} from '../core/constants.js';
+import { SLOT_RADIUS } from '../core/constants.js';
 
 /**
  * Hit-test nodes. Returns the node ID under the point, or null.
@@ -23,8 +17,8 @@ export function hitTestNode(worldPos: Vec2, store: AppStore): string | null {
     const nodes = Object.values(graph.nodes);
     for (let i = nodes.length - 1; i >= 0; i--) {
         const node = nodes[i];
-        const nodeType = store.graph.getNodeType(node.type);
-        const bounds = getNodeBounds(node, nodeType);
+        const bounds = store.graph.getCachedNodeBounds(node.id)
+            ?? getNodeBounds(node, store.graph.getNodeType(node.type));
         if (rectContains(bounds, worldPos)) {
             return node.id;
         }
@@ -48,22 +42,11 @@ export function hitTestSlot(
         const nodeType = store.graph.getNodeType(node.type);
         if (!nodeType) continue;
 
-        const inputs = nodeType.slots.filter(s => s.direction === 'input');
-        const outputs = nodeType.slots.filter(s => s.direction === 'output');
-
-        for (let i = 0; i < inputs.length; i++) {
-            const sx = node.position.x + SLOT_OFFSET_X;
-            const sy = node.position.y + NODE_TITLE_HEIGHT + SLOT_SPACING * (i + 0.5);
-            if (distance(worldPos, { x: sx, y: sy }) <= hitRadius) {
-                return { nodeId: node.id, slotId: inputs[i].id };
-            }
-        }
-
-        for (let i = 0; i < outputs.length; i++) {
-            const sx = node.position.x + NODE_WIDTH - SLOT_OFFSET_X;
-            const sy = node.position.y + NODE_TITLE_HEIGHT + SLOT_SPACING * (i + 0.5);
-            if (distance(worldPos, { x: sx, y: sy }) <= hitRadius) {
-                return { nodeId: node.id, slotId: outputs[i].id };
+        for (const slot of nodeType.slots) {
+            const pos = store.graph.getSlotPosition(node.id, slot.id);
+            if (pos.x === 0 && pos.y === 0) continue;
+            if (distance(worldPos, pos) <= hitRadius) {
+                return { nodeId: node.id, slotId: slot.id };
             }
         }
     }
@@ -83,7 +66,9 @@ export function hitTestConnection(worldPos: Vec2, store: AppStore): string | nul
     for (const conn of graph.connections) {
         const from = store.graph.getSlotPosition(conn.fromNode, conn.fromSlot);
         const to = store.graph.getSlotPosition(conn.toNode, conn.toSlot);
-        const [cp1, cp2] = computeControlPoints(from, to);
+        const fromDir = store.graph.getSlotDirection(conn.fromNode, conn.fromSlot);
+        const toDir = store.graph.getSlotDirection(conn.toNode, conn.toSlot);
+        const [cp1, cp2] = computeControlPoints(from, to, fromDir, toDir);
 
         const dist = distanceToBezier(worldPos, from, cp1, cp2, to);
         if (dist <= threshold) {

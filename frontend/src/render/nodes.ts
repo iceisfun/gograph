@@ -7,7 +7,6 @@ import {
     NODE_TITLE_HEIGHT,
     SLOT_SPACING,
     SLOT_RADIUS,
-    SLOT_OFFSET_X,
     MIN_NODE_HEIGHT,
 } from '../core/constants.js';
 
@@ -58,7 +57,7 @@ export function drawNodes(
 
     for (const node of Object.values(graph.nodes)) {
         const nodeType = store.graph.getNodeType(node.type);
-        const bounds = getNodeBounds(node, nodeType);
+        const bounds = store.graph.getCachedNodeBounds(node.id) ?? getNodeBounds(node, nodeType);
         const isSelected = store.interaction.selectedNodes.has(node.id);
         const isHovered = store.interaction.hoveredNode === node.id;
 
@@ -68,6 +67,22 @@ export function drawNodes(
         const nodeFill = catColors?.fill ?? theme.nodeFill;
         const nodeStroke = catColors?.stroke ?? theme.nodeStroke;
         const nodeTitleBar = catColors?.titleBar ?? theme.nodeTitleBar;
+
+        // Check for shake animation
+        const shake = store.animation.shakingNodes.get(node.id);
+        let shaking = false;
+        if (shake) {
+            const elapsed = now - shake.startTime;
+            const t = elapsed / shake.duration;
+            if (t < 1) {
+                shaking = true;
+                const decay = Math.max(0, 1 - t);
+                const dx = Math.sin(elapsed * 0.05) * shake.intensity * decay;
+                const dy = Math.cos(elapsed * 0.07) * shake.intensity * decay;
+                ctx.save();
+                ctx.translate(dx, dy);
+            }
+        }
 
         // Draw node body
         drawRoundedRect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, theme.nodeCornerRadius);
@@ -139,30 +154,36 @@ export function drawNodes(
             );
         }
 
-        // Draw slots
-        if (nodeType) {
-            const inputs = nodeType.slots.filter(s => s.direction === 'input');
-            const outputs = nodeType.slots.filter(s => s.direction === 'output');
+        // Undo shake translation before drawing slots
+        if (shaking) {
+            ctx.restore();
+        }
 
-            // Input slots (left edge)
-            for (let i = 0; i < inputs.length; i++) {
-                const slot = inputs[i];
-                const sx = bounds.x + SLOT_OFFSET_X;
-                const sy = bounds.y + NODE_TITLE_HEIGHT + SLOT_SPACING * (i + 0.5);
-                const isConnected = store.graph.isSlotConnected(node.id, slot.id);
+        // Draw slots from layout cache
+        const slotLayouts = store.graph.getSlotLayouts(node.id);
+        if (slotLayouts && nodeType) {
+            for (const [slotId, slotLayout] of slotLayouts) {
+                const slotDef = nodeType.slots.find(s => s.id === slotId);
+                if (!slotDef) continue;
+
+                const sx = slotLayout.position.x;
+                const sy = slotLayout.position.y;
+                const isInput = slotDef.direction === 'input';
+                const slotColor = isInput ? theme.slotInputColor : theme.slotOutputColor;
+                const isConnected = store.graph.isSlotConnected(node.id, slotId);
                 const isSlotHovered = store.interaction.hoveredSlot?.nodeId === node.id &&
-                    store.interaction.hoveredSlot?.slotId === slot.id;
+                    store.interaction.hoveredSlot?.slotId === slotId;
 
                 ctx.beginPath();
                 ctx.arc(sx, sy, SLOT_RADIUS, 0, Math.PI * 2);
 
                 if (isConnected) {
-                    ctx.fillStyle = theme.slotInputColor;
+                    ctx.fillStyle = slotColor;
                     ctx.fill();
                 } else {
                     ctx.fillStyle = nodeFill;
                     ctx.fill();
-                    ctx.strokeStyle = theme.slotInputColor;
+                    ctx.strokeStyle = slotColor;
                     ctx.lineWidth = theme.slotStrokeWidth;
                     ctx.stroke();
                 }
@@ -170,56 +191,31 @@ export function drawNodes(
                 if (isSlotHovered) {
                     ctx.beginPath();
                     ctx.arc(sx, sy, SLOT_RADIUS + 2, 0, Math.PI * 2);
-                    ctx.strokeStyle = theme.slotInputColor;
+                    ctx.strokeStyle = slotColor;
                     ctx.lineWidth = 1;
                     ctx.stroke();
                 }
 
-                // Slot label
+                // Slot label positioned based on side
                 ctx.fillStyle = theme.slotLabelColor;
                 ctx.font = theme.slotLabelFont;
-                ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(slot.name, sx + SLOT_RADIUS + 4, sy);
-            }
 
-            // Output slots (right edge)
-            for (let i = 0; i < outputs.length; i++) {
-                const slot = outputs[i];
-                const sx = bounds.x + NODE_WIDTH - SLOT_OFFSET_X;
-                const sy = bounds.y + NODE_TITLE_HEIGHT + SLOT_SPACING * (i + 0.5);
-                const isConnected = store.graph.isSlotConnected(node.id, slot.id);
-                const isSlotHovered = store.interaction.hoveredSlot?.nodeId === node.id &&
-                    store.interaction.hoveredSlot?.slotId === slot.id;
-
-                ctx.beginPath();
-                ctx.arc(sx, sy, SLOT_RADIUS, 0, Math.PI * 2);
-
-                if (isConnected) {
-                    ctx.fillStyle = theme.slotOutputColor;
-                    ctx.fill();
-                } else {
-                    ctx.fillStyle = nodeFill;
-                    ctx.fill();
-                    ctx.strokeStyle = theme.slotOutputColor;
-                    ctx.lineWidth = theme.slotStrokeWidth;
-                    ctx.stroke();
+                switch (slotLayout.side) {
+                    case 'left':
+                        ctx.textAlign = 'left';
+                        ctx.fillText(slotDef.name, sx + SLOT_RADIUS + 4, sy);
+                        break;
+                    case 'right':
+                        ctx.textAlign = 'right';
+                        ctx.fillText(slotDef.name, sx - SLOT_RADIUS - 4, sy);
+                        break;
+                    case 'bottom':
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'top';
+                        ctx.fillText(slotDef.name, sx, sy + SLOT_RADIUS + 2);
+                        break;
                 }
-
-                if (isSlotHovered) {
-                    ctx.beginPath();
-                    ctx.arc(sx, sy, SLOT_RADIUS + 2, 0, Math.PI * 2);
-                    ctx.strokeStyle = theme.slotOutputColor;
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                }
-
-                // Slot label
-                ctx.fillStyle = theme.slotLabelColor;
-                ctx.font = theme.slotLabelFont;
-                ctx.textAlign = 'right';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(slot.name, sx - SLOT_RADIUS - 4, sy);
             }
         }
     }

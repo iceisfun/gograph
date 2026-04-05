@@ -3,13 +3,21 @@ import { CONNECTION_CURVE_OFFSET } from './constants.js';
 
 /**
  * Compute cubic Bezier control points for a connection between two points.
- * Control points are offset horizontally by ~40% of the distance.
+ * Direction vectors control which way the curve leaves/enters each endpoint.
+ * Defaults preserve backward compatibility (right-to-left horizontal).
  */
-export function computeControlPoints(from: Vec2, to: Vec2): [Vec2, Vec2] {
+export function computeControlPoints(
+    from: Vec2,
+    to: Vec2,
+    fromDir: Vec2 = { x: 1, y: 0 },
+    toDir: Vec2 = { x: -1, y: 0 },
+): [Vec2, Vec2] {
     const dx = Math.abs(to.x - from.x);
-    const offset = Math.max(dx * CONNECTION_CURVE_OFFSET, 50);
-    const cp1 = vec2(from.x + offset, from.y);
-    const cp2 = vec2(to.x - offset, to.y);
+    const dy = Math.abs(to.y - from.y);
+    const dist = Math.max(dx, dy);
+    const offset = Math.max(dist * CONNECTION_CURVE_OFFSET, 50);
+    const cp1 = vec2(from.x + fromDir.x * offset, from.y + fromDir.y * offset);
+    const cp2 = vec2(to.x + toDir.x * offset, to.y + toDir.y * offset);
     return [cp1, cp2];
 }
 
@@ -35,10 +43,10 @@ export class BezierPath {
     cp2: Vec2;
     private _dirty = true;
 
-    constructor(from: Vec2, to: Vec2) {
+    constructor(from: Vec2, to: Vec2, fromDir?: Vec2, toDir?: Vec2) {
         this.from = from;
         this.to = to;
-        const [cp1, cp2] = computeControlPoints(from, to);
+        const [cp1, cp2] = computeControlPoints(from, to, fromDir, toDir);
         this.cp1 = cp1;
         this.cp2 = cp2;
     }
@@ -51,10 +59,10 @@ export class BezierPath {
         this._dirty = true;
     }
 
-    update(from: Vec2, to: Vec2): void {
+    update(from: Vec2, to: Vec2, fromDir?: Vec2, toDir?: Vec2): void {
         this.from = from;
         this.to = to;
-        const [cp1, cp2] = computeControlPoints(from, to);
+        const [cp1, cp2] = computeControlPoints(from, to, fromDir, toDir);
         this.cp1 = cp1;
         this.cp2 = cp2;
         this._dirty = false;

@@ -73,4 +73,8 @@ export const defaultTheme: Theme = {
     selectionStroke: 'rgba(233, 69, 96, 0.5)',
     selectionStrokeWidth: 1,
     selectionDash: [5, 3],
+
+    // Node shake animation
+    nodeShakeDuration: 300,
+    nodeShakeIntensity: 3,
 };

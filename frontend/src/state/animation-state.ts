@@ -15,6 +15,7 @@ export class AnimationState {
     activeEvents: Map<string, ActiveEvent> = new Map();
     activeNodes: Map<string, { startTime: number; endTime: number }> = new Map();
     activeConnections: Map<string, { startTime: number; endTime: number; color: string }> = new Map();
+    shakingNodes: Map<string, { startTime: number; duration: number; intensity: number }> = new Map();
 
     activateNode(nodeId: string, durationMs: number): void {
         const now = performance.now();
@@ -24,6 +25,14 @@ export class AnimationState {
     activateConnection(connectionId: string, durationMs: number, color: string): void {
         const now = performance.now();
         this.activeConnections.set(connectionId, { startTime: now, endTime: now + durationMs, color });
+    }
+
+    shakeNode(nodeId: string, duration: number = 300, intensity: number = 3): void {
+        this.shakingNodes.set(nodeId, {
+            startTime: performance.now(),
+            duration,
+            intensity,
+        });
     }
 
     startEvent(payload: EventStartPayload): void {
@@ -89,6 +98,13 @@ export class AnimationState {
         }
         for (const [id, state] of this.activeConnections) {
             if (now >= state.endTime) this.activeConnections.delete(id);
+        }
+
+        // Clean up expired shakes
+        for (const [id, shake] of this.shakingNodes) {
+            if (now >= shake.startTime + shake.duration) {
+                this.shakingNodes.delete(id);
+            }
         }
     }
 }

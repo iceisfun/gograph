@@ -1,17 +1,13 @@
 import type { Graph, Node, Connection, NodeType } from '../core/types.js';
-import type { Vec2 } from '../core/geometry.js';
+import type { Vec2, Rect } from '../core/geometry.js';
 import { vec2 } from '../core/geometry.js';
-import {
-    NODE_WIDTH,
-    NODE_TITLE_HEIGHT,
-    SLOT_SPACING,
-    SLOT_OFFSET_X,
-} from '../core/constants.js';
+import { computeLayout, type NodeLayout, type SlotLayout, type Side } from './layout-cache.js';
 
 export class GraphState {
     current: Graph | null = null;
     private _nodeTypes: NodeType[] = [];
     private _nodeTypeMap: Map<string, NodeType> = new Map();
+    private _layoutCache: Map<string, NodeLayout> = new Map();
 
     setGraph(graph: Graph): void {
         this.current = graph;
@@ -54,40 +50,62 @@ export class GraphState {
     }
 
     /**
+     * Recompute the layout cache for all nodes. Call once per render frame.
+     */
+    computeLayout(): void {
+        this._layoutCache = computeLayout(this.current, this._nodeTypeMap);
+    }
+
+    /**
      * Compute the world-space position of a slot on a node.
-     * Input slots appear on the left edge, output slots on the right edge.
+     * Reads from the layout cache (must call computeLayout() first).
      */
     getSlotPosition(nodeId: string, slotId: string): Vec2 {
-        if (!this.current) return vec2(0, 0);
+        const nodeLayout = this._layoutCache.get(nodeId);
+        if (!nodeLayout) return vec2(0, 0);
+        const slotLayout = nodeLayout.slots.get(slotId);
+        if (!slotLayout) return vec2(0, 0);
+        return slotLayout.position;
+    }
 
-        const node = this.current.nodes[nodeId];
-        if (!node) return vec2(0, 0);
+    /**
+     * Get the outward direction vector for a slot.
+     */
+    getSlotDirection(nodeId: string, slotId: string): Vec2 {
+        const nodeLayout = this._layoutCache.get(nodeId);
+        if (!nodeLayout) return vec2(1, 0);
+        const slotLayout = nodeLayout.slots.get(slotId);
+        if (!slotLayout) return vec2(1, 0);
+        return slotLayout.direction;
+    }
 
-        const nodeType = this._nodeTypeMap.get(node.type);
-        if (!nodeType) return vec2(0, 0);
+    /**
+     * Get which side a slot is on.
+     */
+    getSlotSide(nodeId: string, slotId: string): Side | null {
+        const nodeLayout = this._layoutCache.get(nodeId);
+        if (!nodeLayout) return null;
+        const slotLayout = nodeLayout.slots.get(slotId);
+        if (!slotLayout) return null;
+        return slotLayout.side;
+    }
 
-        const inputs = nodeType.slots.filter(s => s.direction === 'input');
-        const outputs = nodeType.slots.filter(s => s.direction === 'output');
+    /**
+     * Get the cached node bounds from the layout cache.
+     */
+    getCachedNodeBounds(nodeId: string): Rect | null {
+        const nodeLayout = this._layoutCache.get(nodeId);
+        if (!nodeLayout) return null;
+        return nodeLayout.bounds;
+    }
 
-        // Check inputs
-        const inputIdx = inputs.findIndex(s => s.id === slotId);
-        if (inputIdx >= 0) {
-            return vec2(
-                node.position.x + SLOT_OFFSET_X,
-                node.position.y + NODE_TITLE_HEIGHT + SLOT_SPACING * (inputIdx + 0.5),
-            );
-        }
-
-        // Check outputs
-        const outputIdx = outputs.findIndex(s => s.id === slotId);
-        if (outputIdx >= 0) {
-            return vec2(
-                node.position.x + NODE_WIDTH - SLOT_OFFSET_X,
-                node.position.y + NODE_TITLE_HEIGHT + SLOT_SPACING * (outputIdx + 0.5),
-            );
-        }
-
-        return vec2(0, 0);
+    /**
+     * Get all slot layouts for a node (for the renderer).
+     */
+    getSlotLayouts(nodeId: string): Map<string, SlotLayout> | null {
+        const nodeLayout = this._layoutCache.get(nodeId);
+        if (!nodeLayout) return null;
+        return nodeLayout.slots;
     }
 
     /**

@@ -70,4 +70,8 @@ export interface Theme {
     selectionStroke: string;
     selectionStrokeWidth: number;
     selectionDash: number[];
+
+    // Node shake animation
+    nodeShakeDuration: number;
+    nodeShakeIntensity: number;
 }

@@ -40,8 +40,8 @@ export function endBoxSelect(store: AppStore, dragState: DragSelectState): void 
     store.interaction.selectedNodes.clear();
 
     for (const node of Object.values(graph.nodes)) {
-        const nodeType = store.graph.getNodeType(node.type);
-        const bounds = getNodeBounds(node, nodeType);
+        const bounds = store.graph.getCachedNodeBounds(node.id)
+            ?? getNodeBounds(node, store.graph.getNodeType(node.type));
         if (rectsOverlap(selRect, bounds)) {
             store.interaction.selectedNodes.add(node.id);
         }
