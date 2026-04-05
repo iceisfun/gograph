@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 	"time"
@@ -34,6 +33,8 @@ type Engine struct {
 	executor    Executor
 	subscribers []*Subscriber
 	duration    int // default event duration in ms
+	nodeLogger  NodeLogger
+	eventLogger EventLogger
 }
 
 // EngineOption configures an [Engine].
@@ -63,6 +64,22 @@ func WithStore(s store.GraphStore, graphID string) EngineOption {
 	}
 }
 
+// WithNodeLogger sets the logger for node lifecycle events.
+// Defaults to [NopNodeLogger].
+func WithNodeLogger(l NodeLogger) EngineOption {
+	return func(e *Engine) {
+		e.nodeLogger = l
+	}
+}
+
+// WithEventLogger sets the logger for event lifecycle events.
+// Defaults to [NopEventLogger].
+func WithEventLogger(l EventLogger) EngineOption {
+	return func(e *Engine) {
+		e.eventLogger = l
+	}
+}
+
 // WithEventDuration sets the default animation duration in milliseconds
 // for events traversing connections. Defaults to 1000ms.
 func WithEventDuration(ms int) EngineOption {
@@ -74,9 +91,11 @@ func WithEventDuration(ms int) EngineOption {
 // New creates a new engine for the given graph.
 func New(g *graph.Graph, opts ...EngineOption) *Engine {
 	e := &Engine{
-		graph:    g,
-		registry: graph.NewRegistry(),
-		duration: 1000,
+		graph:       g,
+		registry:    graph.NewRegistry(),
+		duration:    1000,
+		nodeLogger:  NopNodeLogger{},
+		eventLogger: NopEventLogger{},
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -151,14 +170,12 @@ func (e *Engine) Execute(ctx context.Context) error {
 		inputs := e.gatherInputs(nodeID, outputs)
 
 		// Skip nodes that expect inputs but have none connected.
-		// These are disconnected sink/transform nodes that shouldn't fire.
 		if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
+			e.nodeLogger.NodeSkipped(nodeID, "has input slots but no incoming connections")
 			continue
 		}
 
-		// Wait for incoming traversals to complete. Each upstream node
-		// emitted at a known time, and each connection has a traversal
-		// duration. We wait until the latest arrival.
+		// Wait for incoming traversals to complete.
 		if waitErr := e.waitForArrivals(ctx, nodeID, emitTimes); waitErr != nil {
 			return waitErr
 		}
@@ -169,6 +186,8 @@ func (e *Engine) Execute(ctx context.Context) error {
 			config = make(map[string]string)
 		}
 
+		e.nodeLogger.NodeExecuting(nodeID, node.Type, len(inputs))
+
 		var nodeOutputs map[string]any
 		if e.executor != nil && nt.Script != "" {
 			nodeOutputs, err = e.executor.ExecuteNode(ctx, nt, inputs, config)
@@ -176,16 +195,17 @@ func (e *Engine) Execute(ctx context.Context) error {
 				return fmt.Errorf("node %q: execution failed: %w", nodeID, err)
 			}
 		} else {
-			// Passthrough: forward inputs as outputs for nodes without scripts.
 			nodeOutputs = inputs
 		}
 
 		outputs[nodeID] = nodeOutputs
+		e.nodeLogger.NodeExecuted(nodeID, node.Type, len(nodeOutputs))
 
 		// If the node has a duration config (e.g. delay nodes), wait before
 		// emitting outgoing events. This creates the actual hold time.
 		if d, ok := config["duration"]; ok {
 			if ms, parseErr := strconv.Atoi(d); parseErr == nil && ms > 0 {
+				e.nodeLogger.NodeHolding(nodeID, ms)
 				select {
 				case <-ctx.Done():
 					e.cancelAll()
@@ -239,6 +259,7 @@ func (e *Engine) waitForArrivals(ctx context.Context, nodeID string, emitTimes m
 	if !latestArrival.IsZero() {
 		wait := time.Until(latestArrival)
 		if wait > 0 {
+			e.nodeLogger.NodeWaiting(nodeID, wait.Milliseconds())
 			select {
 			case <-ctx.Done():
 				e.cancelAll()
@@ -282,7 +303,7 @@ func (e *Engine) logDisconnectedOutputs(nodeID string, nt graph.NodeType) {
 			}
 		}
 		if !connected {
-			log.Printf("node %q: output %q not connected", nodeID, slot.ID)
+			e.nodeLogger.NodeDisconnected(nodeID, slot.ID)
 		}
 	}
 }
@@ -313,6 +334,7 @@ func (e *Engine) emitNodeOutputEvents(nodeID string) {
 		}
 
 		eventID := generateEventID()
+		e.eventLogger.EventEmitted(eventID, c.ID, nodeID, c.ToNode, duration)
 		e.emit(Event{
 			Type: graph.TypeEventStart,
 			Payload: graph.EventStartPayload{
@@ -325,8 +347,9 @@ func (e *Engine) emitNodeOutputEvents(nodeID string) {
 
 		if duration > 0 {
 			// Timed: schedule end event after traversal.
-			go func(eid string, dur int) {
+			go func(eid string, connID string, toNode string, dur int) {
 				time.Sleep(time.Duration(dur) * time.Millisecond)
+				e.eventLogger.EventArrived(eid, connID, toNode)
 				e.emit(Event{
 					Type: graph.TypeEventEnd,
 					Payload: graph.EventEndPayload{
@@ -334,9 +357,10 @@ func (e *Engine) emitNodeOutputEvents(nodeID string) {
 						EventID:  eid,
 					},
 				})
-			}(eventID, duration)
+			}(eventID, c.ID, c.ToNode, duration)
 		} else {
 			// Instant: emit end immediately.
+			e.eventLogger.EventArrived(eventID, c.ID, c.ToNode)
 			e.emit(Event{
 				Type: graph.TypeEventEnd,
 				Payload: graph.EventEndPayload{
@@ -351,6 +375,7 @@ func (e *Engine) emitNodeOutputEvents(nodeID string) {
 // cancelAll emits cancel events for all in-flight events. Called when
 // execution is interrupted by context cancellation.
 func (e *Engine) cancelAll() {
+	e.eventLogger.EventCancelled("context cancelled")
 	e.emit(Event{
 		Type: graph.TypeEventCancel,
 		Payload: graph.EventCancelPayload{

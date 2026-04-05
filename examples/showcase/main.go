@@ -143,6 +143,8 @@ func main() {
 		engine.WithExecutor(luaExec),
 		engine.WithEventDuration(1000),
 		engine.WithStore(st, g.ID),
+		engine.WithNodeLogger(engine.DebugNodeLogger{}),
+		engine.WithEventLogger(engine.DebugEventLogger{}),
 	)
 
 	// Server.
