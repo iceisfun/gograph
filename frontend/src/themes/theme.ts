@@ -90,4 +90,8 @@ export interface Theme {
     // Compatible slot glow (during connection drag)
     slotCompatibleGlow: string;
     slotCompatibleGlowRadius: number;
+
+    // Node content area
+    nodeContentFont: string;
+    nodeContentText: string;
 }

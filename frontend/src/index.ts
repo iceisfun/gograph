@@ -47,6 +47,9 @@ async function main() {
             onEventUpdate: (p) => { store.animation.updateEvent(p); },
             onEventEnd: (p) => { store.animation.endEvent(p.eventID); },
             onEventCancel: (p) => { store.animation.cancelEvent(p.eventID, p.immediate); },
+            onNodeContent: (p) => {
+                store.graph.setNodeContent(p.nodeID, { text: p.text, image: p.image });
+            },
         });
         sse.connect();
     }

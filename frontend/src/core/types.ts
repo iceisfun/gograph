@@ -41,4 +41,5 @@ export interface NodeType {
     slots: Slot[];
     scriptName?: string;
     category?: string;
+    contentHeight?: number;
 }

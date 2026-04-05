@@ -8,6 +8,7 @@ export class GraphState {
     private _nodeTypes: NodeType[] = [];
     private _nodeTypeMap: Map<string, NodeType> = new Map();
     private _layoutCache: Map<string, NodeLayout> = new Map();
+    nodeContent: Map<string, { text?: string; image?: string }> = new Map();
 
     setGraph(graph: Graph): void {
         this.current = graph;
@@ -27,6 +28,10 @@ export class GraphState {
 
     getNodeType(name: string): NodeType | undefined {
         return this._nodeTypeMap.get(name);
+    }
+
+    setNodeContent(nodeId: string, content: { text?: string; image?: string }): void {
+        this.nodeContent.set(nodeId, content);
     }
 
     updateNode(node: Node): void {

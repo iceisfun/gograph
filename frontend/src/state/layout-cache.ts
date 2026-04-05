@@ -159,7 +159,8 @@ export function computeLayout(
         // Compute node bounds based on left/right slot counts
         const verticalSlotCount = Math.max(bySide.left.length, bySide.right.length, 1);
         const bodyHeight = SLOT_SPACING * verticalSlotCount;
-        const height = Math.max(MIN_NODE_HEIGHT, NODE_TITLE_HEIGHT + bodyHeight);
+        const contentHeight = nt.contentHeight || 0;
+        const height = Math.max(MIN_NODE_HEIGHT, NODE_TITLE_HEIGHT + bodyHeight + contentHeight);
         const bounds: Rect = { x: node.position.x, y: node.position.y, width: NODE_WIDTH, height };
 
         // Position slots on each side

@@ -95,4 +95,8 @@ export const defaultTheme: Theme = {
     // Compatible slot glow (during connection drag)
     slotCompatibleGlow: 'rgba(15, 155, 142, 0.8)',
     slotCompatibleGlowRadius: 10,
+
+    // Node content area
+    nodeContentFont: '11px monospace',
+    nodeContentText: '#cccccc',
 };

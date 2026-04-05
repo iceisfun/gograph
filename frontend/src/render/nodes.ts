@@ -15,7 +15,8 @@ export function getNodeBounds(node: Node, nodeType: NodeType | undefined): Rect 
     const outputs = nodeType ? nodeType.slots.filter(s => s.direction === 'output').length : 0;
     const slotCount = Math.max(inputs, outputs);
     const bodyHeight = SLOT_SPACING * Math.max(slotCount, 1);
-    const height = Math.max(MIN_NODE_HEIGHT, NODE_TITLE_HEIGHT + bodyHeight);
+    const contentHeight = nodeType?.contentHeight || 0;
+    const height = Math.max(MIN_NODE_HEIGHT, NODE_TITLE_HEIGHT + bodyHeight + contentHeight);
 
     return {
         x: node.position.x,
@@ -249,6 +250,43 @@ export function drawNodes(
                         break;
                 }
             }
+        }
+
+        // Draw content area
+        const content = store.graph.nodeContent.get(node.id);
+        const contentH = nodeType?.contentHeight || 0;
+        if (content?.text && contentH > 0) {
+            // Content area is below slots
+            const contentSlotLayouts = store.graph.getSlotLayouts(node.id);
+            let leftCount = 0, rightCount = 0;
+            if (contentSlotLayouts) {
+                for (const sl of contentSlotLayouts.values()) {
+                    if (sl.side === 'left') leftCount++;
+                    else if (sl.side === 'right') rightCount++;
+                }
+            }
+            const slotsH = SLOT_SPACING * Math.max(leftCount, rightCount, 1);
+            const contentY = bounds.y + NODE_TITLE_HEIGHT + slotsH;
+
+            // Separator
+            ctx.beginPath();
+            ctx.moveTo(bounds.x + 8, contentY);
+            ctx.lineTo(bounds.x + bounds.width - 8, contentY);
+            ctx.strokeStyle = nodeStroke;
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+
+            // Text (clipped to content area)
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(bounds.x + 4, contentY + 2, bounds.width - 8, contentH - 4);
+            ctx.clip();
+            ctx.fillStyle = theme.nodeContentText;
+            ctx.font = theme.nodeContentFont;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'top';
+            ctx.fillText(content.text, bounds.x + 8, contentY + 6);
+            ctx.restore();
         }
     }
 }

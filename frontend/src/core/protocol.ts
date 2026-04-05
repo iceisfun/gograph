@@ -56,3 +56,11 @@ export interface NodeActivePayload extends Envelope {
 export interface ConnectionUpdatePayload extends Envelope {
     connection: Connection;
 }
+
+export const NODE_CONTENT = 'node.content';
+
+export interface NodeContentPayload extends Envelope {
+    nodeID: string;
+    text?: string;
+    image?: string;
+}
