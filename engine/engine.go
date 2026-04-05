@@ -297,7 +297,7 @@ func (e *Engine) Execute(ctx context.Context) error {
 		e.logDisconnectedOutputs(g, nodeID, nt)
 
 		// Emit events on outgoing connections and record the emit time.
-		e.emitNodeOutputEvents(g, nodeID)
+		e.emitNodeOutputEvents(g, nodeID, nodeOutputs)
 		emitTimes[nodeID] = time.Now()
 	}
 
@@ -386,10 +386,11 @@ func (e *Engine) logDisconnectedOutputs(g *graph.Graph, nodeID string, nt graph.
 	}
 }
 
-// emitNodeOutputEvents emits EventStart for each outgoing connection from
-// the node. Traversal duration is read from each connection's Config["duration"].
-// Connections without a duration are treated as instant (duration=0).
-func (e *Engine) emitNodeOutputEvents(g *graph.Graph, nodeID string) {
+// emitNodeOutputEvents emits events for each outgoing connection.
+// Timed connections (duration > 0) get EventStart + scheduled EventEnd.
+// Instant connections (duration = 0) get a ConnectionState event carrying
+// the current value — these represent continuous wire state, not pulses.
+func (e *Engine) emitNodeOutputEvents(g *graph.Graph, nodeID string, outputs map[string]any) {
 	g.RLock()
 	connections := make([]*graph.Connection, 0)
 	for _, c := range g.Connections {
@@ -411,20 +412,19 @@ func (e *Engine) emitNodeOutputEvents(g *graph.Graph, nodeID string) {
 			}
 		}
 
-		eventID := generateEventID()
-		e.eventLogger.EventEmitted(eventID, c.ID, nodeID, c.ToNode, duration)
-		e.emit(Event{
-			Type: graph.TypeEventStart,
-			Payload: graph.EventStartPayload{
-				Envelope:     graph.NewEnvelope(now),
-				EventID:      eventID,
-				ConnectionID: c.ID,
-				Duration:     duration,
-			},
-		})
-
 		if duration > 0 {
-			// Timed: schedule end event after traversal.
+			// Timed: animate a dot traversing the connection.
+			eventID := generateEventID()
+			e.eventLogger.EventEmitted(eventID, c.ID, nodeID, c.ToNode, duration)
+			e.emit(Event{
+				Type: graph.TypeEventStart,
+				Payload: graph.EventStartPayload{
+					Envelope:     graph.NewEnvelope(now),
+					EventID:      eventID,
+					ConnectionID: c.ID,
+					Duration:     duration,
+				},
+			})
 			go func(eid string, connID string, toNode string, dur int) {
 				time.Sleep(time.Duration(dur) * time.Millisecond)
 				e.eventLogger.EventArrived(eid, connID, toNode)
@@ -437,13 +437,20 @@ func (e *Engine) emitNodeOutputEvents(g *graph.Graph, nodeID string) {
 				})
 			}(eventID, c.ID, c.ToNode, duration)
 		} else {
-			// Instant: emit end immediately.
-			e.eventLogger.EventArrived(eventID, c.ID, c.ToNode)
+			// Instant: emit steady state for this wire.
+			val := ""
+			if v, ok := outputs[c.FromSlot]; ok {
+				val = fmt.Sprintf("%v", v)
+			}
+			active := val != "" && val != "0" && val != "false" && val != "off" && val != "<nil>"
+			e.eventLogger.EventEmitted("", c.ID, nodeID, c.ToNode, 0)
 			e.emit(Event{
-				Type: graph.TypeEventEnd,
-				Payload: graph.EventEndPayload{
-					Envelope: graph.NewEnvelope(now),
-					EventID:  eventID,
+				Type: graph.TypeConnectionState,
+				Payload: graph.ConnectionStatePayload{
+					Envelope:     graph.NewEnvelope(now),
+					ConnectionID: c.ID,
+					Active:       active,
+					Value:        val,
 				},
 			})
 		}

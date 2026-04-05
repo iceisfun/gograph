@@ -104,4 +104,9 @@ export const defaultTheme: Theme = {
     // Interactive node colors
     nodeInteractiveOnColor: '#2ecc71',
     nodeInteractiveOffColor: '#e74c3c',
+
+    // Stateful connection (instant wire)
+    connectionStateActiveStroke: '#2ecc71',
+    connectionStateActiveGlow: 'rgba(46, 204, 113, 0.4)',
+    connectionStateActiveGlowRadius: 6,
 };

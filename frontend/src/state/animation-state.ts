@@ -16,6 +16,8 @@ export class AnimationState {
     activeConnections: Map<string, { startTime: number; endTime: number; color: string }> = new Map();
     shakingNodes: Map<string, { startTime: number; duration: number; intensity: number }> = new Map();
     glowingNodes: Map<string, { startTime: number; endTime: number }> = new Map();
+    /** Steady state for instant (wiretype) connections. Persists until next update. */
+    stateConnections: Map<string, { active: boolean; value: string }> = new Map();
 
     activateNode(nodeId: string, durationMs: number): void {
         const now = performance.now();
@@ -25,6 +27,10 @@ export class AnimationState {
     activateConnection(connectionId: string, durationMs: number, color: string): void {
         const now = performance.now();
         this.activeConnections.set(connectionId, { startTime: now, endTime: now + durationMs, color });
+    }
+
+    setConnectionState(connectionId: string, active: boolean, value: string): void {
+        this.stateConnections.set(connectionId, { active, value });
     }
 
     glowNode(nodeId: string, durationMs: number): void {

@@ -115,6 +115,21 @@ export function drawConnections(
             ctx.stroke();
             ctx.restore();
         }
+
+        // Steady state glow for instant (wire-type) connections
+        const wireState = store.animation.stateConnections.get(conn.id);
+        if (wireState?.active) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, to.x, to.y);
+            ctx.strokeStyle = theme.connectionStateActiveStroke;
+            ctx.lineWidth = theme.connectionStrokeWidth + 1;
+            ctx.shadowBlur = theme.connectionStateActiveGlowRadius;
+            ctx.shadowColor = theme.connectionStateActiveGlow;
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
     // Draw in-progress connection preview

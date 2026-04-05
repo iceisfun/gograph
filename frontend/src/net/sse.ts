@@ -8,6 +8,7 @@ import type {
     NodeActivePayload,
     ConnectionUpdatePayload,
     NodeContentPayload,
+    ConnectionStatePayload,
 } from '../core/protocol.js';
 import {
     EVENT_START,
@@ -19,6 +20,7 @@ import {
     NODE_ACTIVE,
     CONNECTION_UPDATE,
     NODE_CONTENT,
+    CONNECTION_STATE,
 } from '../core/protocol.js';
 
 export interface SSEHandlers {
@@ -31,6 +33,7 @@ export interface SSEHandlers {
     onNodeActive?(payload: NodeActivePayload): void;
     onConnectionUpdate(payload: ConnectionUpdatePayload): void;
     onNodeContent?(payload: NodeContentPayload): void;
+    onConnectionState?(payload: ConnectionStatePayload): void;
     onConnect?(): void;
     onDisconnect?(): void;
 }
@@ -125,6 +128,10 @@ export class SSEClient {
 
         this.eventSource.addEventListener(NODE_CONTENT, (e) => {
             this.handlers.onNodeContent?.(JSON.parse((e as MessageEvent).data) as NodeContentPayload);
+        });
+
+        this.eventSource.addEventListener(CONNECTION_STATE, (e) => {
+            this.handlers.onConnectionState?.(JSON.parse((e as MessageEvent).data) as ConnectionStatePayload);
         });
     }
 }

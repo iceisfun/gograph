@@ -14,6 +14,7 @@ const (
 	TypeNodeUpdate       = "node.update"
 	TypeNodeActive       = "node.active"
 	TypeNodeContent      = "node.content"
+	TypeConnectionState  = "connection.state"
 	TypeConnectionUpdate = "connection.update"
 )
 
@@ -96,6 +97,17 @@ type NodeContentPayload struct {
 	NodeID string `json:"nodeID"`
 	Text   string `json:"text,omitempty"`
 	Image  string `json:"image,omitempty"`
+}
+
+// ConnectionStatePayload is sent for instant connections to convey the
+// continuous state of the wire. Unlike timed events (which animate a dot),
+// stateful connections show a steady visual based on whether the value is
+// active (truthy).
+type ConnectionStatePayload struct {
+	Envelope
+	ConnectionID string `json:"connectionID"`
+	Active       bool   `json:"active"`
+	Value        string `json:"value,omitempty"`
 }
 
 // ConnectionUpdatePayload is sent when a single connection is added or modified.

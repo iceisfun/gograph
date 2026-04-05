@@ -98,4 +98,9 @@ export interface Theme {
     // Interactive node colors
     nodeInteractiveOnColor: string;
     nodeInteractiveOffColor: string;
+
+    // Stateful connection (instant wire carrying a value)
+    connectionStateActiveStroke: string;
+    connectionStateActiveGlow: string;
+    connectionStateActiveGlowRadius: number;
 }

@@ -50,6 +50,9 @@ async function main() {
             onNodeContent: (p) => {
                 store.graph.setNodeContent(p.nodeID, { text: p.text, image: p.image });
             },
+            onConnectionState: (p) => {
+                store.animation.setConnectionState(p.connectionID, p.active, p.value || '');
+            },
         });
         sse.connect();
     }
