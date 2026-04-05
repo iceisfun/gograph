@@ -1,4 +1,4 @@
-import type { Node, NodeType } from '../core/types.js';
+import type { Node, NodeType, Connection } from '../core/types.js';
 
 export class ConfigModal {
     private overlay: HTMLDivElement;
@@ -142,6 +142,96 @@ export class ConfigModal {
         document.addEventListener('keydown', this.boundEscape);
 
         // Focus first input
+        const firstInput = Object.values(inputs)[0];
+        if (firstInput) setTimeout(() => firstInput.focus(), 0);
+    }
+
+    showConnection(conn: Connection, onSave: (config: Record<string, string>) => void): void {
+        this.modal.innerHTML = '';
+
+        const title = document.createElement('div');
+        Object.assign(title.style, { fontSize: '16px', fontWeight: 'bold', marginBottom: '16px', color: '#fff' });
+        title.textContent = 'Connection Properties';
+        this.modal.appendChild(title);
+
+        const config = { ...(conn.config || {}) };
+        const inputs: Record<string, HTMLInputElement> = {};
+
+        const fields: { key: string; label: string; type: string; placeholder: string }[] = [
+            { key: 'duration', label: 'Traversal Duration (ms)', type: 'number', placeholder: '0 (instant)' },
+        ];
+
+        // Also show any existing config keys not already listed
+        for (const key of Object.keys(config)) {
+            if (!fields.find(f => f.key === key)) {
+                fields.push({ key, label: key, type: 'text', placeholder: '' });
+            }
+        }
+
+        for (const field of fields) {
+            const row = document.createElement('div');
+            row.style.marginBottom = '12px';
+
+            const label = document.createElement('label');
+            Object.assign(label.style, { display: 'block', fontSize: '12px', marginBottom: '4px', color: '#999' });
+            label.textContent = field.label;
+            row.appendChild(label);
+
+            const input = document.createElement('input');
+            Object.assign(input.style, {
+                width: '100%',
+                padding: '6px 8px',
+                backgroundColor: '#1a1a2e',
+                border: '1px solid #0f3460',
+                borderRadius: '4px',
+                color: '#fff',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+            });
+            input.type = field.type;
+            input.value = config[field.key] || '';
+            input.placeholder = field.placeholder;
+            row.appendChild(input);
+
+            inputs[field.key] = input;
+            this.modal.appendChild(row);
+        }
+
+        // Buttons
+        const buttons = document.createElement('div');
+        Object.assign(buttons.style, { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' });
+
+        const cancelBtn = document.createElement('button');
+        Object.assign(cancelBtn.style, {
+            padding: '6px 16px', backgroundColor: 'transparent', border: '1px solid #0f3460',
+            borderRadius: '4px', color: '#999', cursor: 'pointer', fontSize: '13px',
+        });
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => this.hide());
+        buttons.appendChild(cancelBtn);
+
+        const saveBtn = document.createElement('button');
+        Object.assign(saveBtn.style, {
+            padding: '6px 16px', backgroundColor: '#e94560', border: 'none',
+            borderRadius: '4px', color: '#fff', cursor: 'pointer', fontSize: '13px',
+        });
+        saveBtn.textContent = 'Save';
+        saveBtn.addEventListener('click', () => {
+            const result: Record<string, string> = {};
+            for (const [key, input] of Object.entries(inputs)) {
+                if (input.value) result[key] = input.value;
+            }
+            onSave(result);
+            this.hide();
+        });
+        buttons.appendChild(saveBtn);
+
+        this.modal.appendChild(buttons);
+
+        this.overlay.style.display = 'flex';
+        this.visible = true;
+        document.addEventListener('keydown', this.boundEscape);
+
         const firstInput = Object.values(inputs)[0];
         if (firstInput) setTimeout(() => firstInput.focus(), 0);
     }

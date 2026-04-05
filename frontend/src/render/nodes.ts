@@ -174,6 +174,24 @@ export function drawNodes(
                 const isSlotHovered = store.interaction.hoveredSlot?.nodeId === node.id &&
                     store.interaction.hoveredSlot?.slotId === slotId;
 
+                // Compatible slot glow during connection drag
+                const slotKey = `${node.id}:${slotLayout.slotId}`;
+                const isDraggingConnection = store.interaction.dragState?.type === 'connection';
+                const isCompatible = isDraggingConnection && store.interaction.compatibleSlots.has(slotKey);
+
+                if (isCompatible) {
+                    ctx.save();
+                    ctx.shadowBlur = theme.slotCompatibleGlowRadius;
+                    ctx.shadowColor = theme.slotCompatibleGlow;
+                    const pulseR = SLOT_RADIUS + 4 + Math.sin(now * 0.008) * 2;
+                    ctx.beginPath();
+                    ctx.arc(sx, sy, pulseR, 0, Math.PI * 2);
+                    ctx.strokeStyle = theme.slotCompatibleGlow;
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
                 ctx.beginPath();
                 ctx.arc(sx, sy, SLOT_RADIUS, 0, Math.PI * 2);
 

@@ -74,4 +74,8 @@ export interface Theme {
     // Node shake animation
     nodeShakeDuration: number;
     nodeShakeIntensity: number;
+
+    // Compatible slot glow (during connection drag)
+    slotCompatibleGlow: string;
+    slotCompatibleGlowRadius: number;
 }

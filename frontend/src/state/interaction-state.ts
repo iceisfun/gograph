@@ -46,9 +46,19 @@ export class InteractionState {
         this.selectedConnections.clear();
     }
 
+    compatibleSlots: Set<string> = new Set();
+
     clearHover(): void {
         this.hoveredNode = null;
         this.hoveredSlot = null;
         this.hoveredConnection = null;
+    }
+
+    setCompatibleSlots(slots: Set<string>): void {
+        this.compatibleSlots = slots;
+    }
+
+    clearCompatibleSlots(): void {
+        this.compatibleSlots.clear();
     }
 }

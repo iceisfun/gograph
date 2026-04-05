@@ -77,4 +77,8 @@ export const defaultTheme: Theme = {
     // Node shake animation
     nodeShakeDuration: 300,
     nodeShakeIntensity: 3,
+
+    // Compatible slot glow (during connection drag)
+    slotCompatibleGlow: 'rgba(15, 155, 142, 0.8)',
+    slotCompatibleGlowRadius: 10,
 };

@@ -95,6 +95,29 @@ export class InteractionHandler {
                 const slot = nodeType?.slots.find(s => s.id === slotHit.slotId);
                 if (slot?.direction === 'output') {
                     interaction.dragState = startConnect(slotHit.nodeId, slotHit.slotId, worldPos);
+
+                    // Compute compatible input slots for highlighting
+                    const graph = this.store.graph.current;
+                    if (graph) {
+                        const fromNodeType = this.store.graph.getNodeType(node.type);
+                        const fromSlotDef = fromNodeType?.slots.find(s => s.id === slotHit.slotId);
+                        if (fromSlotDef) {
+                            const compatible = new Set<string>();
+                            for (const [otherId, otherNode] of Object.entries(graph.nodes)) {
+                                if (otherId === slotHit.nodeId) continue;
+                                const otherType = this.store.graph.getNodeType(otherNode.type);
+                                if (!otherType) continue;
+                                for (const s of otherType.slots) {
+                                    if (s.direction !== 'input') continue;
+                                    if (fromSlotDef.dataType === 'any' || s.dataType === 'any' || fromSlotDef.dataType === s.dataType) {
+                                        compatible.add(`${otherId}:${s.id}`);
+                                    }
+                                }
+                            }
+                            this.store.interaction.setCompatibleSlots(compatible);
+                        }
+                    }
+
                     return;
                 }
             }
@@ -216,6 +239,7 @@ export class InteractionHandler {
                     break;
             }
             interaction.dragState = null;
+            interaction.clearCompatibleSlots();
         }
     }
 
@@ -307,25 +331,45 @@ export class InteractionHandler {
         const worldPos = this.store.camera.screenToWorld(screenPos);
 
         const nodeHit = hitTestNode(worldPos, this.store);
-        if (!nodeHit) return;
+        if (nodeHit) {
+            const graph = this.store.graph.current;
+            if (!graph) return;
 
-        const graph = this.store.graph.current;
-        if (!graph) return;
+            const node = graph.nodes[nodeHit];
+            if (!node) return;
 
-        const node = graph.nodes[nodeHit];
-        if (!node) return;
+            const nodeType = this.store.graph.getNodeType(node.type);
+            if (!nodeType) return;
 
-        const nodeType = this.store.graph.getNodeType(node.type);
-        if (!nodeType) return;
-
-        // Show config modal for nodes with config or delay-category nodes
-        if (node.config || nodeType.category === 'delay') {
-            this.configModal.show(node, nodeType, (config) => {
-                node.config = config;
-                void this.api.updateGraph(graph.id, graph).catch(err => {
-                    console.error('Failed to persist config update:', err);
+            // Show config modal for nodes with config or delay-category nodes
+            if (node.config || nodeType.category === 'delay') {
+                this.configModal.show(node, nodeType, (config) => {
+                    node.config = config;
+                    void this.api.updateGraph(graph.id, graph).catch(err => {
+                        console.error('Failed to persist config update:', err);
+                    });
                 });
-            });
+            }
+            return;
+        }
+
+        // Check connection hit for config modal
+        if (this.store.interaction.mode === 'edit') {
+            const connHit = hitTestConnection(worldPos, this.store);
+            if (connHit) {
+                const graph = this.store.graph.current;
+                if (graph) {
+                    const conn = graph.connections.find(c => c.id === connHit);
+                    if (conn) {
+                        this.configModal.showConnection(conn, (config) => {
+                            conn.config = Object.keys(config).length > 0 ? config : undefined;
+                            void this.api.updateGraph(graph.id, graph).catch(err => {
+                                console.error('Failed to persist connection config:', err);
+                            });
+                        });
+                    }
+                }
+            }
         }
     }
 }

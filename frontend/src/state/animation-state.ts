@@ -1,5 +1,4 @@
 import type { EventStartPayload, EventUpdatePayload } from '../core/protocol.js';
-import { DEFAULT_EVENT_DURATION } from '../core/constants.js';
 
 export interface ActiveEvent {
     eventID: string;
@@ -36,16 +35,22 @@ export class AnimationState {
     }
 
     startEvent(payload: EventStartPayload): void {
-        this.activeEvents.set(payload.eventID, {
-            eventID: payload.eventID,
-            connectionID: payload.connectionID,
-            startTime: performance.now(),
-            duration: payload.duration || DEFAULT_EVENT_DURATION,
-            color: payload.color || '#e94560',
-            intensity: 1,
-            progress: 0,
-        });
-        this.activateConnection(payload.connectionID, payload.duration || DEFAULT_EVENT_DURATION, payload.color || '');
+        if (payload.duration > 0) {
+            // Timed: animate dot along curve
+            this.activeEvents.set(payload.eventID, {
+                eventID: payload.eventID,
+                connectionID: payload.connectionID,
+                startTime: performance.now(),
+                duration: payload.duration,
+                color: payload.color || '',
+                intensity: 1,
+                progress: 0,
+            });
+            this.activateConnection(payload.connectionID, payload.duration, payload.color || '');
+        } else {
+            // Instant: brief flash on connection (200ms dash), no dot
+            this.activateConnection(payload.connectionID, 200, payload.color || '');
+        }
     }
 
     updateEvent(payload: EventUpdatePayload): void {

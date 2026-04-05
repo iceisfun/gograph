@@ -32,6 +32,7 @@ export interface Connection {
     fromSlot: string;
     toNode: string;
     toSlot: string;
+    config?: Record<string, string>;
 }
 
 export interface NodeType {
