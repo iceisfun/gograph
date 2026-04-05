@@ -127,6 +127,9 @@ func (e *Engine) Execute(ctx context.Context) error {
 
 	// outputs tracks the output values of each node, keyed by node ID then slot ID.
 	outputs := make(map[string]map[string]any)
+	// emitTimes tracks when each node emitted its outgoing events, so
+	// downstream nodes can wait for traversal to complete.
+	emitTimes := make(map[string]time.Time)
 
 	for _, nodeID := range order {
 		if err := ctx.Err(); err != nil {
@@ -151,6 +154,13 @@ func (e *Engine) Execute(ctx context.Context) error {
 		// These are disconnected sink/transform nodes that shouldn't fire.
 		if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
 			continue
+		}
+
+		// Wait for incoming traversals to complete. Each upstream node
+		// emitted at a known time, and each connection has a traversal
+		// duration. We wait until the latest arrival.
+		if waitErr := e.waitForArrivals(ctx, nodeID, emitTimes); waitErr != nil {
+			return waitErr
 		}
 
 		// Execute the node.
@@ -188,11 +198,55 @@ func (e *Engine) Execute(ctx context.Context) error {
 		// Log disconnected output slots.
 		e.logDisconnectedOutputs(nodeID, nt)
 
-		// Emit events on outgoing connections.
-		// Traversal duration is per-connection via connection.Config["duration"].
+		// Emit events on outgoing connections and record the emit time.
 		e.emitNodeOutputEvents(nodeID)
+		emitTimes[nodeID] = time.Now()
 	}
 
+	return nil
+}
+
+// waitForArrivals waits until all incoming connection traversals have
+// completed. For each incoming connection, we compute when the upstream
+// node emitted plus the connection's traversal duration, and sleep until
+// the latest arrival time.
+func (e *Engine) waitForArrivals(ctx context.Context, nodeID string, emitTimes map[string]time.Time) error {
+	e.graph.RLock()
+	var latestArrival time.Time
+	for _, c := range e.graph.Connections {
+		if c.ToNode != nodeID {
+			continue
+		}
+		emitTime, ok := emitTimes[c.FromNode]
+		if !ok {
+			continue
+		}
+		duration := 0
+		if c.Config != nil {
+			if d, ok := c.Config["duration"]; ok {
+				if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
+					duration = ms
+				}
+			}
+		}
+		arrival := emitTime.Add(time.Duration(duration) * time.Millisecond)
+		if arrival.After(latestArrival) {
+			latestArrival = arrival
+		}
+	}
+	e.graph.RUnlock()
+
+	if !latestArrival.IsZero() {
+		wait := time.Until(latestArrival)
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				e.cancelAll()
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+	}
 	return nil
 }
 
