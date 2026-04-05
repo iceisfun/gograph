@@ -245,7 +245,25 @@ func (e *Engine) evaluateWires(ctx context.Context) {
 		} else {
 			nodeOutputs = inputs
 		}
-		delete(nodeOutputs, "_display")
+
+		// Emit display content on change.
+		if display, ok := nodeOutputs["_display"]; ok {
+			if text, ok := display.(string); ok {
+				key := nodeID + ":_display"
+				if prev, loaded := e.lastWireState.Load(key); !loaded || prev.(string) != text {
+					e.lastWireState.Store(key, text)
+					e.emit(Event{
+						Type: graph.TypeNodeContent,
+						Payload: graph.NodeContentPayload{
+							Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
+							NodeID:   nodeID,
+							Text:     text,
+						},
+					})
+				}
+			}
+			delete(nodeOutputs, "_display")
+		}
 		outputs[nodeID] = nodeOutputs
 
 		// Emit connection.state for instant connections, only on change.
