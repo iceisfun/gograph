@@ -94,6 +94,46 @@ func (s *Server) handleDeleteGraph(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleClickNode toggles a node's state and broadcasts the update.
+// Interactive nodes use Config["state"] to track on/off.
+func (s *Server) handleClickNode(w http.ResponseWriter, r *http.Request) {
+	graphID := r.PathValue("id")
+	nodeID := r.PathValue("nodeId")
+
+	g, err := s.store.Load(r.Context(), graphID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("graph %q not found", graphID))
+		return
+	}
+
+	node := g.Node(nodeID)
+	if node == nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("node %q not found", nodeID))
+		return
+	}
+
+	if node.Config == nil {
+		node.Config = make(map[string]string)
+	}
+	if node.Config["state"] == "on" {
+		node.Config["state"] = "off"
+	} else {
+		node.Config["state"] = "on"
+	}
+
+	if err := s.store.Save(r.Context(), graphID, g); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.broker.publish(graphID, graph.TypeNodeUpdate, graph.NodeUpdatePayload{
+		Envelope: graph.NewEnvelope(timeNowMilli()),
+		Node:     node,
+	})
+
+	writeJSON(w, http.StatusOK, node)
+}
+
 // handleAddNode adds a single node to a graph and broadcasts the update.
 func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

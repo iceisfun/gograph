@@ -13,6 +13,7 @@ type NodeType struct {
 	Label         string `json:"label"`
 	Category      string `json:"category,omitempty"`
 	ContentHeight int    `json:"contentHeight,omitempty"`
+	Interactive   bool   `json:"interactive,omitempty"`
 	Slots         []Slot `json:"slots"`
 	Script        string `json:"-"`
 	ScriptName    string `json:"scriptName,omitempty"`
