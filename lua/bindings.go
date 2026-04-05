@@ -41,11 +41,12 @@ func New(registry *graph.Registry, opts ...Option) *Bindings {
 	return b
 }
 
-// ExecuteNode runs a node type's Lua script with the given inputs.
-// A fresh sandboxed VM is created for each execution. The inputs map
-// is set as a global Lua table "inputs". The script must return a table
-// whose keys are output slot IDs and values are the output data.
-func (b *Bindings) ExecuteNode(ctx context.Context, nt graph.NodeType, inputs map[string]any) (map[string]any, error) {
+// ExecuteNode runs a node type's Lua script with the given inputs and
+// node config. A fresh sandboxed VM is created for each execution. The
+// inputs map is set as a global Lua table "inputs" and the config map
+// as "config". The script must return a table whose keys are output
+// slot IDs and values are the output data.
+func (b *Bindings) ExecuteNode(ctx context.Context, nt graph.NodeType, inputs map[string]any, config map[string]string) (map[string]any, error) {
 	if nt.Script == "" {
 		return nil, fmt.Errorf("node type %q has no script", nt.Name)
 	}
@@ -76,6 +77,13 @@ func (b *Bindings) ExecuteNode(ctx context.Context, nt graph.NodeType, inputs ma
 	// Set the inputs global.
 	inputTable := goMapToLuaTable(inputs)
 	v.SetGlobal("inputs", vm.NewTable(inputTable))
+
+	// Set the config global.
+	configTable := vm.NewEmptyTable()
+	for k, val := range config {
+		configTable.SetString(k, vm.NewString(val))
+	}
+	v.SetGlobal("config", vm.NewTable(configTable))
 
 	// Run the script.
 	results, err := v.Run(proto)

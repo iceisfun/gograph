@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -12,9 +13,11 @@ import (
 )
 
 // Executor runs a node's logic with the given inputs and returns outputs.
-// The lua package provides the primary implementation.
+// The config parameter carries the node's instance configuration (e.g.
+// "duration" for delay nodes). The lua package provides the primary
+// implementation.
 type Executor interface {
-	ExecuteNode(ctx context.Context, nt graph.NodeType, inputs map[string]any) (map[string]any, error)
+	ExecuteNode(ctx context.Context, nt graph.NodeType, inputs map[string]any, config map[string]string) (map[string]any, error)
 }
 
 // Engine executes a graph by traversing nodes in topological order and
@@ -122,9 +125,14 @@ func (e *Engine) Execute(ctx context.Context) error {
 		inputs := e.gatherInputs(nodeID, outputs)
 
 		// Execute the node.
+		config := node.Config
+		if config == nil {
+			config = make(map[string]string)
+		}
+
 		var nodeOutputs map[string]any
 		if e.executor != nil && nt.Script != "" {
-			nodeOutputs, err = e.executor.ExecuteNode(ctx, nt, inputs)
+			nodeOutputs, err = e.executor.ExecuteNode(ctx, nt, inputs, config)
 			if err != nil {
 				return fmt.Errorf("node %q: execution failed: %w", nodeID, err)
 			}
@@ -136,7 +144,8 @@ func (e *Engine) Execute(ctx context.Context) error {
 		outputs[nodeID] = nodeOutputs
 
 		// Emit events on outgoing connections.
-		e.emitNodeOutputEvents(nodeID)
+		// Per-node duration override via config["duration"].
+		e.emitNodeOutputEvents(nodeID, config)
 	}
 
 	return nil
@@ -161,7 +170,8 @@ func (e *Engine) gatherInputs(nodeID string, outputs map[string]map[string]any) 
 }
 
 // emitNodeOutputEvents emits EventStart for each outgoing connection from the node.
-func (e *Engine) emitNodeOutputEvents(nodeID string) {
+// The config map is checked for a "duration" key to override the default event duration.
+func (e *Engine) emitNodeOutputEvents(nodeID string, config map[string]string) {
 	e.graph.RLock()
 	connections := make([]*graph.Connection, 0)
 	for _, c := range e.graph.Connections {
@@ -170,6 +180,14 @@ func (e *Engine) emitNodeOutputEvents(nodeID string) {
 		}
 	}
 	e.graph.RUnlock()
+
+	// Per-node duration override.
+	duration := e.duration
+	if d, ok := config["duration"]; ok {
+		if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
+			duration = ms
+		}
+	}
 
 	now := time.Now().UnixMilli()
 	for _, c := range connections {
@@ -180,13 +198,13 @@ func (e *Engine) emitNodeOutputEvents(nodeID string) {
 				Envelope:     graph.NewEnvelope(now),
 				EventID:      eventID,
 				ConnectionID: c.ID,
-				Duration:     e.duration,
+				Duration:     duration,
 			},
 		})
 
 		// Schedule the end event after the duration.
-		go func(eid string) {
-			time.Sleep(time.Duration(e.duration) * time.Millisecond)
+		go func(eid string, dur int) {
+			time.Sleep(time.Duration(dur) * time.Millisecond)
 			e.emit(Event{
 				Type: graph.TypeEventEnd,
 				Payload: graph.EventEndPayload{
@@ -194,7 +212,7 @@ func (e *Engine) emitNodeOutputEvents(nodeID string) {
 					EventID:  eid,
 				},
 			})
-		}(eventID)
+		}(eventID, duration)
 	}
 }
 

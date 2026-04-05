@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/iceisfun/gograph/graph"
 )
+
+func timeNowMilli() int64 { return time.Now().UnixMilli() }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -89,6 +92,44 @@ func (s *Server) handleDeleteGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAddNode adds a single node to a graph and broadcasts the update.
+func (s *Server) handleAddNode(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	g, err := s.store.Load(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("graph %q not found", id))
+		return
+	}
+
+	var n graph.Node
+	if err := json.NewDecoder(r.Body).Decode(&n); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if n.ID == "" {
+		writeError(w, http.StatusBadRequest, "node ID is required")
+		return
+	}
+
+	if err := g.AddNode(&n); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err := s.store.Save(r.Context(), id, g); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Broadcast the node addition.
+	s.broker.publish(id, graph.TypeNodeUpdate, graph.NodeUpdatePayload{
+		Envelope: graph.NewEnvelope(timeNowMilli()),
+		Node:     &n,
+	})
+
+	writeJSON(w, http.StatusCreated, &n)
 }
 
 // handleExecuteGraph is a placeholder for triggering graph execution.

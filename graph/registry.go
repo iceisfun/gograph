@@ -11,6 +11,7 @@ import (
 type NodeType struct {
 	Name       string `json:"name"`
 	Label      string `json:"label"`
+	Category   string `json:"category,omitempty"`
 	Slots      []Slot `json:"slots"`
 	Script     string `json:"-"`
 	ScriptName string `json:"scriptName,omitempty"`

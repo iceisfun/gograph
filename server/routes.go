@@ -13,6 +13,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT "+p+"/api/graphs/{id}", s.handleUpdateGraph)
 	s.mux.HandleFunc("DELETE "+p+"/api/graphs/{id}", s.handleDeleteGraph)
 
+	// Node operations
+	s.mux.HandleFunc("POST "+p+"/api/graphs/{id}/nodes", s.handleAddNode)
+
 	// Execution placeholder
 	s.mux.HandleFunc("POST "+p+"/api/graphs/{id}/execute", s.handleExecuteGraph)
 
