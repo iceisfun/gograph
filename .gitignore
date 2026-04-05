@@ -1,0 +1,4 @@
+# Frontend build artifacts
+frontend/dist/bundle.js
+frontend/dist/bundle.js.map
+frontend/node_modules/
