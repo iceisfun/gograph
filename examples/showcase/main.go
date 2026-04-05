@@ -206,6 +206,23 @@ func main() {
 		},
 		Script: mustReadFile("scripts/shift_register.lua"),
 	}))
+	must(reg.Register(graph.NodeType{
+		Name: "toggle", Label: "Toggle", Category: "source",
+		Interactive: true, ContentHeight: 40,
+		Slots: []graph.Slot{
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+		},
+		Script: mustReadFile("scripts/toggle.lua"),
+	}))
+	must(reg.Register(graph.NodeType{
+		Name: "gate", Label: "Gate", Category: "transform",
+		Interactive: true, ContentHeight: 40,
+		Slots: []graph.Slot{
+			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
+			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
+		},
+		Script: mustReadFile("scripts/gate.lua"),
+	}))
 
 	// Build the showcase graph with multiple paths.
 	//
@@ -265,6 +282,14 @@ func main() {
 	must(g.Connect(&graph.Connection{ID: "c12", FromNode: "osc2", FromSlot: "out", ToNode: "and1", ToSlot: "a", Config: map[string]string{"duration": "500"}}))
 	must(g.Connect(&graph.Connection{ID: "c13", FromNode: "osc3", FromSlot: "out", ToNode: "and1", ToSlot: "b", Config: map[string]string{"duration": "500"}}))
 	must(g.Connect(&graph.Connection{ID: "c14", FromNode: "and1", FromSlot: "out", ToNode: "show_and", ToSlot: "in"}))
+
+	// Row 6: toggle -> gate -> show (interactive demo)
+	must(g.AddNode(&graph.Node{ID: "tog1", Type: "toggle", Label: "Toggle", Position: graph.Position{X: 80, Y: 1020}, Config: map[string]string{"state": "on"}}))
+	must(g.AddNode(&graph.Node{ID: "gate1", Type: "gate", Label: "Gate", Position: graph.Position{X: 400, Y: 1020}, Config: map[string]string{"state": "on"}}))
+	must(g.AddNode(&graph.Node{ID: "show_gate", Type: "show", Label: "Show", Position: graph.Position{X: 700, Y: 1020}}))
+
+	must(g.Connect(&graph.Connection{ID: "c15", FromNode: "tog1", FromSlot: "out", ToNode: "gate1", ToSlot: "in", Config: map[string]string{"duration": "600"}}))
+	must(g.Connect(&graph.Connection{ID: "c16", FromNode: "gate1", FromSlot: "out", ToNode: "show_gate", ToSlot: "in"}))
 
 	// Persist.
 	st := store.NewMemoryStore()
