@@ -201,8 +201,15 @@ func main() {
 	must(reg.Register(graph.NodeType{
 		Name: "shift_register", Label: "Shift Register", Category: "logic", ContentHeight: 30,
 		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
+			{ID: "clk", Name: "Clock", Direction: graph.Input, DataType: "any"},
+			{ID: "b0", Name: "Bit 0", Direction: graph.Output, DataType: "string"},
+			{ID: "b1", Name: "Bit 1", Direction: graph.Output, DataType: "string"},
+			{ID: "b2", Name: "Bit 2", Direction: graph.Output, DataType: "string"},
+			{ID: "b3", Name: "Bit 3", Direction: graph.Output, DataType: "string"},
+			{ID: "b4", Name: "Bit 4", Direction: graph.Output, DataType: "string"},
+			{ID: "b5", Name: "Bit 5", Direction: graph.Output, DataType: "string"},
+			{ID: "b6", Name: "Bit 6", Direction: graph.Output, DataType: "string"},
+			{ID: "b7", Name: "Bit 7", Direction: graph.Output, DataType: "string"},
 		},
 		Script: mustReadFile("scripts/shift_register.lua"),
 	}))
