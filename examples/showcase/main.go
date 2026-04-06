@@ -32,6 +32,7 @@ func main() {
 		"words", "splitter", "ratelimit",
 		"and", "or", "xor", "not",
 		"counter", "shift_register", "toggle", "gate",
+		"dashboard",
 	}
 	for _, name := range scripts {
 		must(golua.Register(reg, name, mustReadFile("scripts/"+name+".lua")))
@@ -105,6 +106,9 @@ func main() {
 
 	must(g.Connect(graph.NewStateConnection("c15", "tog1", "out", "gate1", "in", "bool", nil)))
 	must(g.Connect(graph.NewEventConnection("c16", "gate1", "out", "show_gate", "in", nil)))
+
+	// Row 7: dashboard (all slot types demo)
+	must(g.AddNode(&graph.Node{ID: "dash1", Type: "dashboard", Label: "Dashboard", Position: graph.Position{X: 80, Y: 1180}, Config: map[string]string{"interval": "1500"}}))
 
 	// Persist.
 	st := store.NewMemoryStore()

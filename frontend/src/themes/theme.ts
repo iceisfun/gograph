@@ -103,4 +103,15 @@ export interface Theme {
     connectionStateActiveStroke: string;
     connectionStateActiveGlow: string;
     connectionStateActiveGlowRadius: number;
+
+    // Rich content slot rendering
+    slotProgressTrack: string;
+    slotProgressFill: string;
+    slotLedOn: string;
+    slotLedOff: string;
+    slotLedGlow: string;
+    slotSpinnerColor: string;
+    slotBadgeFont: string;
+    slotSparklineStroke: string;
+    slotSparklineFill: string;
 }

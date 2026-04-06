@@ -10,6 +10,13 @@ export interface ActiveEvent {
     progress: number;
 }
 
+export interface ProgressAnimation {
+    startValue: number;
+    endValue: number;
+    startTime: number;
+    duration: number;
+}
+
 export interface TextSlotAnimation {
     nodeID: string;
     slotName: string;
@@ -29,6 +36,8 @@ export class AnimationState {
     stateConnections: Map<string, { active: boolean; value: string }> = new Map();
     /** Text slot animations (flash, pulse). Key: "nodeID:slotName" */
     textSlotAnimations: Map<string, TextSlotAnimation> = new Map();
+    /** Progress bar animations. Key: "nodeID:slotName" */
+    progressAnimations: Map<string, ProgressAnimation> = new Map();
 
     activateNode(nodeId: string, durationMs: number): void {
         const now = performance.now();
@@ -60,6 +69,28 @@ export class AnimationState {
             startTime: performance.now(),
             duration,
         });
+    }
+
+    animateProgress(nodeID: string, slotName: string, from: number, to: number, duration: number): void {
+        const key = `${nodeID}:${slotName}`;
+        this.progressAnimations.set(key, {
+            startValue: from,
+            endValue: to,
+            startTime: performance.now(),
+            duration,
+        });
+    }
+
+    getProgressValue(nodeID: string, slotName: string, fallback: number): number {
+        const key = `${nodeID}:${slotName}`;
+        const anim = this.progressAnimations.get(key);
+        if (!anim) return fallback;
+        const elapsed = performance.now() - anim.startTime;
+        const t = Math.min(1, elapsed / anim.duration);
+        const eased = t * t * (3 - 2 * t); // smoothstep
+        const val = anim.startValue + (anim.endValue - anim.startValue) * eased;
+        if (t >= 1) this.progressAnimations.delete(key);
+        return val;
     }
 
     shakeNode(nodeId: string, duration: number = 300, intensity: number = 3): void {

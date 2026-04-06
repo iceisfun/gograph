@@ -48,9 +48,24 @@ async function main() {
             onEventEnd: (p) => { store.animation.endEvent(p.eventID); },
             onEventCancel: (p) => { store.animation.cancelEvent(p.eventID, p.immediate); },
             onNodeContent: (p) => {
-                store.graph.setNodeContent(p.nodeID, { text: p.text, image: p.image, slots: p.slots });
+                // Capture previous progress values before updating state
+                const prevEntry = store.graph.nodeContent.get(p.nodeID);
                 if (p.slots) {
                     for (const [name, slot] of Object.entries(p.slots)) {
+                        // Trigger progress animation when duration > 0
+                        if (slot.type === 'progress' && slot.duration && slot.duration > 0) {
+                            let prevValue = 0;
+                            if (prevEntry) {
+                                const prev = prevEntry.slots.get(name);
+                                if (prev && prev.type === 'progress') {
+                                    prevValue = prev.value;
+                                }
+                            }
+                            store.animation.animateProgress(
+                                p.nodeID, name, prevValue, slot.value, slot.duration,
+                            );
+                        }
+                        // Trigger text/badge animations
                         if (slot.animate && slot.animate !== 'none') {
                             store.animation.animateTextSlot(
                                 p.nodeID, name, slot.animate,
@@ -59,6 +74,7 @@ async function main() {
                         }
                     }
                 }
+                store.graph.setNodeContent(p.nodeID, { text: p.text, image: p.image, slots: p.slots });
             },
             onConnectionState: (p) => {
                 store.animation.setConnectionState(p.connectionID, p.active, p.value || '');

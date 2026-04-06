@@ -47,7 +47,7 @@ export class GraphState {
         // Backward compat: text-only payload → default slot
         if (payload.text !== undefined && !payload.slots) {
             entry.text = payload.text;
-            entry.slots.set('default', { text: payload.text });
+            entry.slots.set('default', { type: 'text', text: payload.text });
         }
 
         if (payload.image !== undefined) {

@@ -255,7 +255,13 @@ func buildPersistentNodeBinding(
 			} else {
 				return 0
 			}
-			cb.Display("default", graph.ContentSlot{Text: text})
+			cb.Display("default", &graph.TextSlot{Text: text})
+		} else if arg2.IsTable() {
+			// 2 args: display(slot, opts) → named slot from opts table (no text arg)
+			if !arg1.IsString() {
+				return 0
+			}
+			cb.Display(arg1.AsString(), parseContentSlotOpts(arg2.AsTable(), ""))
 		} else {
 			// 2+ args: display(slot, text [, opts])
 			if !arg1.IsString() {
@@ -273,7 +279,7 @@ func buildPersistentNodeBinding(
 			if arg3.IsTable() {
 				cb.Display(slotName, parseContentSlotOpts(arg3.AsTable(), text))
 			} else {
-				cb.Display(slotName, graph.ContentSlot{Text: text})
+				cb.Display(slotName, &graph.TextSlot{Text: text})
 			}
 		}
 		return 0
@@ -373,28 +379,143 @@ func buildPersistentNodeBinding(
 // Connection binding (read-only table per connection)
 // ---------------------------------------------------------------------------
 
-// parseContentSlotOpts reads style options from a Lua table into a ContentSlot.
-func parseContentSlotOpts(t vm.LuaTable, text string) graph.ContentSlot {
-	s := graph.ContentSlot{Text: text}
+// luaTruthy returns true unless the value is nil or false.
+func luaTruthy(v vm.Value) bool {
+	if v.IsNil() {
+		return false
+	}
+	if v.IsBool() {
+		return v.AsBool()
+	}
+	return true
+}
+
+// parseBaseSlot reads shared style fields from a Lua table.
+func parseBaseSlot(t vm.LuaTable) graph.BaseSlot {
+	var b graph.BaseSlot
 	if v := t.Get(vm.NewString("color")); v.IsString() {
-		s.Color = v.AsString()
-	}
-	if v := t.Get(vm.NewString("size")); v.IsNumber() {
-		s.Size = int(v.AsInt())
-	}
-	if v := t.Get(vm.NewString("align")); v.IsString() {
-		s.Align = v.AsString()
-	}
-	if v := t.Get(vm.NewString("font")); v.IsString() {
-		s.Font = v.AsString()
+		b.Color = v.AsString()
 	}
 	if v := t.Get(vm.NewString("animate")); v.IsString() {
-		s.Animate = v.AsString()
+		b.Animate = v.AsString()
 	}
 	if v := t.Get(vm.NewString("duration")); v.IsNumber() {
-		s.Duration = int(v.AsInt())
+		b.Duration = int(v.AsInt())
 	}
-	return s
+	return b
+}
+
+// parseContentSlotOpts reads a Lua options table and returns the appropriate
+// concrete ContentSlot type based on the "type" field.
+func parseContentSlotOpts(t vm.LuaTable, text string) graph.ContentSlot {
+	slotType := ""
+	if v := t.Get(vm.NewString("type")); v.IsString() {
+		slotType = v.AsString()
+	}
+	base := parseBaseSlot(t)
+
+	switch slotType {
+	case "progress":
+		s := &graph.ProgressSlot{BaseSlot: base}
+		if v := t.Get(vm.NewString("value")); v.IsNumber() {
+			s.Value = v.AsFloat()
+		}
+		return s
+
+	case "led":
+		s := &graph.LedSlot{BaseSlot: base}
+		if v := t.Get(vm.NewString("states")); v.IsTable() {
+			tbl := v.AsTable()
+			for i := int64(1); ; i++ {
+				elem := tbl.Get(vm.NewInt(i))
+				if elem.IsNil() {
+					break
+				}
+				s.States = append(s.States, luaTruthy(elem))
+			}
+		}
+		return s
+
+	case "spinner":
+		s := &graph.SpinnerSlot{BaseSlot: base}
+		if v := t.Get(vm.NewString("visible")); v.IsBool() {
+			s.Visible = v.AsBool()
+		}
+		return s
+
+	case "badge":
+		s := &graph.BadgeSlot{BaseSlot: base, Text: text}
+		if v := t.Get(vm.NewString("text")); v.IsString() {
+			s.Text = v.AsString()
+		}
+		if v := t.Get(vm.NewString("background")); v.IsString() {
+			s.Background = v.AsString()
+		}
+		return s
+
+	case "sparkline":
+		s := &graph.SparklineSlot{BaseSlot: base}
+		if v := t.Get(vm.NewString("values")); v.IsTable() {
+			tbl := v.AsTable()
+			for i := int64(1); ; i++ {
+				elem := tbl.Get(vm.NewInt(i))
+				if elem.IsNil() {
+					break
+				}
+				if elem.IsNumber() {
+					s.Values = append(s.Values, elem.AsFloat())
+				}
+			}
+		}
+		if v := t.Get(vm.NewString("min")); v.IsNumber() {
+			f := v.AsFloat()
+			s.Min = &f
+		}
+		if v := t.Get(vm.NewString("max")); v.IsNumber() {
+			f := v.AsFloat()
+			s.Max = &f
+		}
+		return s
+
+	case "image":
+		s := &graph.ImageSlot{BaseSlot: base}
+		if v := t.Get(vm.NewString("src")); v.IsString() {
+			s.Src = v.AsString()
+		}
+		if v := t.Get(vm.NewString("width")); v.IsNumber() {
+			s.Width = int(v.AsInt())
+		}
+		if v := t.Get(vm.NewString("height")); v.IsNumber() {
+			s.Height = int(v.AsInt())
+		}
+		return s
+
+	case "svg":
+		s := &graph.SvgSlot{BaseSlot: base, Markup: text}
+		if v := t.Get(vm.NewString("markup")); v.IsString() {
+			s.Markup = v.AsString()
+		}
+		if v := t.Get(vm.NewString("width")); v.IsNumber() {
+			s.Width = int(v.AsInt())
+		}
+		if v := t.Get(vm.NewString("height")); v.IsNumber() {
+			s.Height = int(v.AsInt())
+		}
+		return s
+
+	default: // "text" or ""
+		s := &graph.TextSlot{BaseSlot: base, Text: text}
+		if v := t.Get(vm.NewString("size")); v.IsNumber() {
+			s.Size = int(v.AsInt())
+		}
+		if v := t.Get(vm.NewString("align")); v.IsString() {
+			s.Align = v.AsString()
+		}
+		if v := t.Get(vm.NewString("font")); v.IsString() {
+			s.Font = v.AsString()
+		}
+		return s
+	}
 }
 
 // BuildConnectionBinding creates a Lua table representing a connection.

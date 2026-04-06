@@ -109,4 +109,15 @@ export const defaultTheme: Theme = {
     connectionStateActiveStroke: '#2ecc71',
     connectionStateActiveGlow: 'rgba(46, 204, 113, 0.4)',
     connectionStateActiveGlowRadius: 6,
+
+    // Rich content slot rendering
+    slotProgressTrack: '#333333',
+    slotProgressFill: '#4CAF50',
+    slotLedOn: '#2ecc71',
+    slotLedOff: '#444444',
+    slotLedGlow: '#2ecc71',
+    slotSpinnerColor: '#888888',
+    slotBadgeFont: '10px sans-serif',
+    slotSparklineStroke: '#4CAF50',
+    slotSparklineFill: 'rgba(76,175,80,0.2)',
 };

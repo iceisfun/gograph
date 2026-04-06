@@ -60,15 +60,65 @@ export interface ConnectionUpdatePayload extends Envelope {
 export const NODE_CONTENT = 'node.content';
 export const CONNECTION_STATE = 'connection.state';
 
-export interface ContentSlot {
-    text: string;
+// Base fields shared by all slot types
+interface BaseSlot {
+    type: string;
     color?: string;
-    size?: number;
-    align?: string;    // left|center|right
-    font?: string;     // monospace|sans-serif
-    animate?: string;  // flash|pulse|none
-    duration?: number; // animation ms
+    animate?: string;   // flash|pulse|none
+    duration?: number;  // animation ms
 }
+
+export interface TextSlot extends BaseSlot {
+    type: 'text';
+    text: string;
+    size?: number;
+    align?: string;
+    font?: string;
+}
+
+export interface ProgressSlot extends BaseSlot {
+    type: 'progress';
+    value: number;      // 0.0..1.0
+}
+
+export interface LedSlot extends BaseSlot {
+    type: 'led';
+    states: boolean[];
+}
+
+export interface SpinnerSlot extends BaseSlot {
+    type: 'spinner';
+    visible: boolean;
+}
+
+export interface BadgeSlot extends BaseSlot {
+    type: 'badge';
+    text?: string;
+    background?: string;
+}
+
+export interface SparklineSlot extends BaseSlot {
+    type: 'sparkline';
+    values: number[];
+    min?: number;
+    max?: number;
+}
+
+export interface ImageSlot extends BaseSlot {
+    type: 'image';
+    src: string;
+    width?: number;
+    height?: number;
+}
+
+export interface SvgSlot extends BaseSlot {
+    type: 'svg';
+    markup: string;
+    width?: number;
+    height?: number;
+}
+
+export type ContentSlot = TextSlot | ProgressSlot | LedSlot | SpinnerSlot | BadgeSlot | SparklineSlot | ImageSlot | SvgSlot;
 
 export interface NodeContentPayload extends Envelope {
     nodeID: string;

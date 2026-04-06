@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -34,7 +35,7 @@ type nodeRunner struct {
 	config   map[string]string // Go-side mirror of self.config
 	nodeType graph.NodeType
 
-	lastSlots   map[string]graph.ContentSlot // per-slot change detection
+	lastSlots   map[string]string // per-slot change detection (stores last JSON)
 	lastLabel   string
 	updateLabel func(nodeID, label string)
 
@@ -66,7 +67,7 @@ func newNodeRunner(
 		stateOutputs:  make(map[string]any),
 		config:        config,
 		nodeType:      nt,
-		lastSlots:     make(map[string]graph.ContentSlot),
+		lastSlots:     make(map[string]string),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -271,13 +272,13 @@ func (nr *nodeRunner) set(slot string, value any) {
 }
 
 func (nr *nodeRunner) display(slotName string, slot graph.ContentSlot) {
-	// Skip change detection if animation requested (always re-trigger).
-	if slot.Animate == "" {
-		if prev, ok := nr.lastSlots[slotName]; ok && prev == slot {
-			return
-		}
+	// Change detection via JSON snapshot.
+	key, _ := json.Marshal(slot)
+	keyStr := string(key)
+	if prev, ok := nr.lastSlots[slotName]; ok && prev == keyStr {
+		return
 	}
-	nr.lastSlots[slotName] = slot
+	nr.lastSlots[slotName] = keyStr
 
 	payload := graph.NodeContentPayload{
 		Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
@@ -285,7 +286,9 @@ func (nr *nodeRunner) display(slotName string, slot graph.ContentSlot) {
 		Slots:    map[string]graph.ContentSlot{slotName: slot},
 	}
 	if slotName == "default" {
-		payload.Text = slot.Text // backward compat
+		if ts, ok := slot.(*graph.TextSlot); ok {
+			payload.Text = ts.Text // backward compat
+		}
 	}
 	nr.broker.Publish(nr.graphID, graph.TypeNodeContent, payload)
 }

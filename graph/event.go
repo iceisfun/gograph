@@ -1,5 +1,7 @@
 package graph
 
+import "encoding/json"
+
 // ProtocolVersion is the current version of the SSE wire protocol.
 const ProtocolVersion = 1
 
@@ -90,24 +92,249 @@ type NodeActivePayload struct {
 	Duration int    `json:"duration"`
 }
 
-// ContentSlot describes a named text region inside a node's content area.
-type ContentSlot struct {
-	Text     string `json:"text"`
-	Color    string `json:"color,omitempty"`    // CSS color
-	Size     int    `json:"size,omitempty"`     // font size px (0 = theme default)
-	Align    string `json:"align,omitempty"`    // left|center|right
-	Font     string `json:"font,omitempty"`     // monospace|sans-serif
+// ContentSlot is a named visual region inside a node's content area.
+// Concrete implementations are [TextSlot], [ProgressSlot], [LedSlot],
+// [SpinnerSlot], [BadgeSlot], [SparklineSlot], and [ImageSlot].
+type ContentSlot interface {
+	SlotType() string // "text", "progress", "led", "spinner", "badge", "sparkline", "image"
+}
+
+// BaseSlot holds fields shared by slot types that support color and animation.
+type BaseSlot struct {
+	Type     string `json:"type"`
+	Color    string `json:"color,omitempty"`
 	Animate  string `json:"animate,omitempty"`  // flash|pulse|none
 	Duration int    `json:"duration,omitempty"` // animation ms
+}
+
+// TextSlot renders styled text.
+type TextSlot struct {
+	BaseSlot
+	Text  string `json:"text,omitempty"`
+	Size  int    `json:"size,omitempty"`  // font size px
+	Align string `json:"align,omitempty"` // left|center|right
+	Font  string `json:"font,omitempty"`  // monospace|sans-serif
+}
+
+func (s *TextSlot) SlotType() string { return "text" }
+
+// MarshalJSON ensures the type field is always "text".
+func (s *TextSlot) MarshalJSON() ([]byte, error) {
+	type Alias TextSlot
+	tmp := (*Alias)(s)
+	tmp.Type = "text"
+	return json.Marshal(tmp)
+}
+
+// ProgressSlot renders a progress bar.
+type ProgressSlot struct {
+	BaseSlot
+	Value float64 `json:"value"` // 0.0..1.0
+}
+
+func (s *ProgressSlot) SlotType() string { return "progress" }
+
+func (s *ProgressSlot) MarshalJSON() ([]byte, error) {
+	type Alias ProgressSlot
+	tmp := (*Alias)(s)
+	tmp.Type = "progress"
+	return json.Marshal(tmp)
+}
+
+// LedSlot renders a row of LED indicators.
+type LedSlot struct {
+	BaseSlot
+	States []bool `json:"states"` // per-LED on/off
+}
+
+func (s *LedSlot) SlotType() string { return "led" }
+
+func (s *LedSlot) MarshalJSON() ([]byte, error) {
+	type Alias LedSlot
+	tmp := (*Alias)(s)
+	tmp.Type = "led"
+	return json.Marshal(tmp)
+}
+
+// SpinnerSlot renders a rotating spinner.
+type SpinnerSlot struct {
+	BaseSlot
+	Visible bool `json:"visible"`
+}
+
+func (s *SpinnerSlot) SlotType() string { return "spinner" }
+
+func (s *SpinnerSlot) MarshalJSON() ([]byte, error) {
+	type Alias SpinnerSlot
+	tmp := (*Alias)(s)
+	tmp.Type = "spinner"
+	return json.Marshal(tmp)
+}
+
+// BadgeSlot renders a colored pill with text.
+type BadgeSlot struct {
+	BaseSlot
+	Text       string `json:"text,omitempty"`
+	Background string `json:"background,omitempty"` // pill fill color
+}
+
+func (s *BadgeSlot) SlotType() string { return "badge" }
+
+func (s *BadgeSlot) MarshalJSON() ([]byte, error) {
+	type Alias BadgeSlot
+	tmp := (*Alias)(s)
+	tmp.Type = "badge"
+	return json.Marshal(tmp)
+}
+
+// SparklineSlot renders a tiny inline chart.
+type SparklineSlot struct {
+	BaseSlot
+	Values []float64 `json:"values"`          // data points
+	Min    *float64  `json:"min,omitempty"`    // scale minimum (auto if nil)
+	Max    *float64  `json:"max,omitempty"`    // scale maximum (auto if nil)
+}
+
+func (s *SparklineSlot) SlotType() string { return "sparkline" }
+
+func (s *SparklineSlot) MarshalJSON() ([]byte, error) {
+	type Alias SparklineSlot
+	tmp := (*Alias)(s)
+	tmp.Type = "sparkline"
+	return json.Marshal(tmp)
+}
+
+// ImageSlot renders an inline image.
+type ImageSlot struct {
+	BaseSlot
+	Src    string `json:"src"`              // data URI or URL
+	Width  int    `json:"width,omitempty"`  // display width px
+	Height int    `json:"height,omitempty"` // display height px
+}
+
+func (s *ImageSlot) SlotType() string { return "image" }
+
+func (s *ImageSlot) MarshalJSON() ([]byte, error) {
+	type Alias ImageSlot
+	tmp := (*Alias)(s)
+	tmp.Type = "image"
+	return json.Marshal(tmp)
+}
+
+// SvgSlot renders inline SVG markup.
+type SvgSlot struct {
+	BaseSlot
+	Markup string `json:"markup"`           // raw SVG string
+	Width  int    `json:"width,omitempty"`  // display width px
+	Height int    `json:"height,omitempty"` // display height px
+}
+
+func (s *SvgSlot) SlotType() string { return "svg" }
+
+func (s *SvgSlot) MarshalJSON() ([]byte, error) {
+	type Alias SvgSlot
+	tmp := (*Alias)(s)
+	tmp.Type = "svg"
+	return json.Marshal(tmp)
+}
+
+// unmarshalContentSlot decodes a single content slot from JSON using the
+// "type" discriminator.
+func unmarshalContentSlot(data json.RawMessage) (ContentSlot, error) {
+	var probe struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	switch probe.Type {
+	case "progress":
+		var s ProgressSlot
+		return &s, json.Unmarshal(data, &s)
+	case "led":
+		var s LedSlot
+		return &s, json.Unmarshal(data, &s)
+	case "spinner":
+		var s SpinnerSlot
+		return &s, json.Unmarshal(data, &s)
+	case "badge":
+		var s BadgeSlot
+		return &s, json.Unmarshal(data, &s)
+	case "sparkline":
+		var s SparklineSlot
+		return &s, json.Unmarshal(data, &s)
+	case "image":
+		var s ImageSlot
+		return &s, json.Unmarshal(data, &s)
+	case "svg":
+		var s SvgSlot
+		return &s, json.Unmarshal(data, &s)
+	default: // "" or "text"
+		var s TextSlot
+		return &s, json.Unmarshal(data, &s)
+	}
 }
 
 // NodeContentPayload is sent when a node's display content changes.
 type NodeContentPayload struct {
 	Envelope
-	NodeID string                  `json:"nodeID"`
-	Text   string                  `json:"text,omitempty"`            // backward compat
-	Image  string                  `json:"image,omitempty"`
-	Slots  map[string]ContentSlot  `json:"slots,omitempty"`
+	NodeID string                 `json:"nodeID"`
+	Text   string                 `json:"text,omitempty"` // backward compat
+	Image  string                 `json:"image,omitempty"`
+	Slots  map[string]ContentSlot `json:"-"`
+}
+
+// MarshalJSON serializes NodeContentPayload with polymorphic slots.
+func (p NodeContentPayload) MarshalJSON() ([]byte, error) {
+	type Alias struct {
+		Envelope
+		NodeID string                       `json:"nodeID"`
+		Text   string                       `json:"text,omitempty"`
+		Image  string                       `json:"image,omitempty"`
+		Slots  map[string]json.RawMessage   `json:"slots,omitempty"`
+	}
+	a := Alias{Envelope: p.Envelope, NodeID: p.NodeID, Text: p.Text, Image: p.Image}
+	if len(p.Slots) > 0 {
+		a.Slots = make(map[string]json.RawMessage, len(p.Slots))
+		for k, v := range p.Slots {
+			raw, err := json.Marshal(v)
+			if err != nil {
+				return nil, err
+			}
+			a.Slots[k] = raw
+		}
+	}
+	return json.Marshal(a)
+}
+
+// UnmarshalJSON deserializes NodeContentPayload with polymorphic slots.
+func (p *NodeContentPayload) UnmarshalJSON(data []byte) error {
+	type Alias struct {
+		Envelope
+		NodeID string                       `json:"nodeID"`
+		Text   string                       `json:"text,omitempty"`
+		Image  string                       `json:"image,omitempty"`
+		Slots  map[string]json.RawMessage   `json:"slots,omitempty"`
+	}
+	var a Alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	p.Envelope = a.Envelope
+	p.NodeID = a.NodeID
+	p.Text = a.Text
+	p.Image = a.Image
+	if len(a.Slots) > 0 {
+		p.Slots = make(map[string]ContentSlot, len(a.Slots))
+		for k, raw := range a.Slots {
+			s, err := unmarshalContentSlot(raw)
+			if err != nil {
+				return err
+			}
+			p.Slots[k] = s
+		}
+	}
+	return nil
 }
 
 // ConnectionStatePayload is sent for instant connections to convey the

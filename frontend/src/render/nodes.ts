@@ -2,6 +2,10 @@ import type { AppStore } from '../state/store.js';
 import type { Theme } from '../themes/theme.js';
 import type { Node, NodeType } from '../core/types.js';
 import type { Rect } from '../core/geometry.js';
+import type {
+    TextSlot, ProgressSlot, LedSlot,
+    SpinnerSlot, BadgeSlot, SparklineSlot, ImageSlot, SvgSlot,
+} from '../core/protocol.js';
 import {
     NODE_WIDTH,
     NODE_TITLE_HEIGHT,
@@ -45,6 +49,356 @@ function drawRoundedRect(
     ctx.lineTo(x, y + r);
     ctx.arcTo(x, y, x + r, y, r);
     ctx.closePath();
+}
+
+// Module-level image cache for ImageSlot
+const imageCache: Map<string, HTMLImageElement> = new Map();
+
+// Module-level SVG blob URL cache for SvgSlot (keyed by markup hash)
+const svgCache: Map<string, HTMLImageElement> = new Map();
+
+function renderTextSlot(
+    ctx: CanvasRenderingContext2D,
+    store: AppStore,
+    theme: Theme,
+    nodeId: string,
+    slotName: string,
+    slot: TextSlot,
+    bounds: Rect,
+    _slotX: number,
+    drawY: number,
+    lineHeight: number,
+    now: number,
+): void {
+    const fontSize = slot.size || 11;
+    const fontFamily = slot.font || 'monospace';
+    ctx.font = `${fontSize}px ${fontFamily}`;
+
+    const align = (slot.align || 'left') as CanvasTextAlign;
+    ctx.textAlign = align;
+    let textX: number;
+    if (align === 'center') {
+        textX = bounds.x + bounds.width / 2;
+    } else if (align === 'right') {
+        textX = bounds.x + bounds.width - 8;
+    } else {
+        textX = bounds.x + 8;
+    }
+    ctx.textBaseline = 'top';
+
+    let textColor = slot.color || theme.nodeContentText;
+    const animKey = `${nodeId}:${slotName}`;
+    const anim = store.animation.textSlotAnimations.get(animKey);
+
+    if (anim) {
+        const elapsed = now - anim.startTime;
+        const t = Math.min(1, elapsed / anim.duration);
+
+        if (anim.type === 'flash') {
+            textColor = t < 0.5 ? anim.color : (slot.color || theme.nodeContentText);
+        } else if (anim.type === 'pulse') {
+            const alpha = 0.3 + 0.7 * Math.abs(Math.sin(elapsed * 0.01));
+            ctx.globalAlpha = alpha;
+            textColor = anim.color;
+        }
+    }
+
+    ctx.fillStyle = textColor;
+    ctx.fillText(slot.text || '', textX, drawY);
+
+    if (anim?.type === 'pulse') {
+        ctx.globalAlpha = 1;
+    }
+}
+
+function renderProgressSlot(
+    ctx: CanvasRenderingContext2D,
+    store: AppStore,
+    theme: Theme,
+    nodeId: string,
+    slotName: string,
+    slot: ProgressSlot,
+    slotX: number,
+    drawY: number,
+    slotW: number,
+    lineHeight: number,
+): void {
+    const barH = 8;
+    const barY = drawY + (lineHeight - barH) / 2;
+    const r = 3;
+
+    // Track
+    ctx.beginPath();
+    ctx.moveTo(slotX + r, barY);
+    ctx.lineTo(slotX + slotW - r, barY);
+    ctx.arcTo(slotX + slotW, barY, slotX + slotW, barY + r, r);
+    ctx.lineTo(slotX + slotW, barY + barH - r);
+    ctx.arcTo(slotX + slotW, barY + barH, slotX + slotW - r, barY + barH, r);
+    ctx.lineTo(slotX + r, barY + barH);
+    ctx.arcTo(slotX, barY + barH, slotX, barY + barH - r, r);
+    ctx.lineTo(slotX, barY + r);
+    ctx.arcTo(slotX, barY, slotX + r, barY, r);
+    ctx.closePath();
+    ctx.fillStyle = theme.slotProgressTrack;
+    ctx.fill();
+
+    // Fill (animated or static)
+    const value = store.animation.getProgressValue(nodeId, slotName, slot.value);
+    const fillW = Math.max(0, value * slotW);
+    if (fillW > 0) {
+        ctx.beginPath();
+        const fw = Math.max(r * 2, fillW);
+        ctx.moveTo(slotX + r, barY);
+        ctx.lineTo(slotX + fw - r, barY);
+        ctx.arcTo(slotX + fw, barY, slotX + fw, barY + r, Math.min(r, fw / 2));
+        ctx.lineTo(slotX + fw, barY + barH - r);
+        ctx.arcTo(slotX + fw, barY + barH, slotX + fw - r, barY + barH, Math.min(r, fw / 2));
+        ctx.lineTo(slotX + r, barY + barH);
+        ctx.arcTo(slotX, barY + barH, slotX, barY + barH - r, r);
+        ctx.lineTo(slotX, barY + r);
+        ctx.arcTo(slotX, barY, slotX + r, barY, r);
+        ctx.closePath();
+        ctx.fillStyle = slot.color || theme.slotProgressFill;
+        ctx.fill();
+    }
+}
+
+function renderLedSlot(
+    ctx: CanvasRenderingContext2D,
+    theme: Theme,
+    slot: LedSlot,
+    slotX: number,
+    drawY: number,
+    slotW: number,
+    lineHeight: number,
+): void {
+    const count = slot.states.length;
+    if (count === 0) return;
+    const radius = 5;
+    const cy = drawY + lineHeight / 2;
+    const spacing = slotW / count;
+
+    for (let i = 0; i < count; i++) {
+        const cx = slotX + spacing * (i + 0.5);
+        const isOn = slot.states[i];
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+
+        if (isOn) {
+            ctx.save();
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = theme.slotLedGlow;
+            ctx.fillStyle = slot.color || theme.slotLedOn;
+            ctx.fill();
+            ctx.restore();
+        } else {
+            ctx.fillStyle = theme.slotLedOff;
+            ctx.fill();
+        }
+    }
+}
+
+function renderSpinnerSlot(
+    ctx: CanvasRenderingContext2D,
+    theme: Theme,
+    slot: SpinnerSlot,
+    slotX: number,
+    drawY: number,
+    slotW: number,
+    lineHeight: number,
+): void {
+    if (!slot.visible) return;
+    const cx = slotX + slotW / 2;
+    const cy = drawY + lineHeight / 2;
+    const radius = 5;
+    const startAngle = performance.now() * 0.006;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, startAngle + 4.5);
+    ctx.strokeStyle = slot.color || theme.slotSpinnerColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+}
+
+function renderBadgeSlot(
+    ctx: CanvasRenderingContext2D,
+    store: AppStore,
+    theme: Theme,
+    nodeId: string,
+    slotName: string,
+    slot: BadgeSlot,
+    slotX: number,
+    drawY: number,
+    slotW: number,
+    lineHeight: number,
+    now: number,
+): void {
+    const pillH = lineHeight - 4;
+    const pillR = pillH / 2;
+    const pillY = drawY + 2;
+    const text = slot.text || '';
+
+    // Measure text to size pill
+    ctx.font = theme.slotBadgeFont;
+    const textW = ctx.measureText(text).width;
+    const pillW = Math.min(slotW, textW + pillR * 2 + 4);
+    const pillX = slotX + (slotW - pillW) / 2;
+
+    // Pill background
+    ctx.beginPath();
+    ctx.moveTo(pillX + pillR, pillY);
+    ctx.lineTo(pillX + pillW - pillR, pillY);
+    ctx.arc(pillX + pillW - pillR, pillY + pillR, pillR, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(pillX + pillR, pillY + pillH);
+    ctx.arc(pillX + pillR, pillY + pillR, pillR, Math.PI / 2, -Math.PI / 2);
+    ctx.closePath();
+    ctx.fillStyle = slot.background || '#555';
+    ctx.fill();
+
+    // Text (may be animated)
+    let textColor = slot.color || '#fff';
+    const animKey = `${nodeId}:${slotName}`;
+    const anim = store.animation.textSlotAnimations.get(animKey);
+    if (anim) {
+        const elapsed = now - anim.startTime;
+        const t = Math.min(1, elapsed / anim.duration);
+        if (anim.type === 'flash') {
+            textColor = t < 0.5 ? anim.color : (slot.color || '#fff');
+        } else if (anim.type === 'pulse') {
+            const alpha = 0.3 + 0.7 * Math.abs(Math.sin(elapsed * 0.01));
+            ctx.globalAlpha = alpha;
+            textColor = anim.color;
+        }
+    }
+
+    ctx.fillStyle = textColor;
+    ctx.font = theme.slotBadgeFont;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, pillX + pillW / 2, pillY + pillH / 2);
+
+    if (anim?.type === 'pulse') {
+        ctx.globalAlpha = 1;
+    }
+}
+
+function renderSparklineSlot(
+    ctx: CanvasRenderingContext2D,
+    theme: Theme,
+    slot: SparklineSlot,
+    slotX: number,
+    drawY: number,
+    slotW: number,
+    lineHeight: number,
+): void {
+    const values = slot.values;
+    if (!values || values.length === 0) return;
+
+    const minVal = slot.min ?? Math.min(...values);
+    const maxVal = slot.max ?? Math.max(...values);
+    const range = maxVal - minVal || 1;
+    const yTop = drawY;
+    const yBot = drawY + lineHeight;
+
+    const toX = (i: number) => slotX + (i / (values.length - 1 || 1)) * slotW;
+    const toY = (v: number) => yBot - ((v - minVal) / range) * lineHeight;
+
+    // Fill area
+    ctx.beginPath();
+    ctx.moveTo(toX(0), yBot);
+    for (let i = 0; i < values.length; i++) {
+        ctx.lineTo(toX(i), toY(values[i]));
+    }
+    ctx.lineTo(toX(values.length - 1), yBot);
+    ctx.closePath();
+    ctx.fillStyle = theme.slotSparklineFill;
+    ctx.fill();
+
+    // Stroke line
+    ctx.beginPath();
+    ctx.moveTo(toX(0), toY(values[0]));
+    for (let i = 1; i < values.length; i++) {
+        ctx.lineTo(toX(i), toY(values[i]));
+    }
+    ctx.strokeStyle = slot.color || theme.slotSparklineStroke;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+}
+
+function renderImageSlot(
+    ctx: CanvasRenderingContext2D,
+    slot: ImageSlot,
+    slotX: number,
+    drawY: number,
+    slotW: number,
+    lineHeight: number,
+): void {
+    const src = slot.src;
+    if (!src) return;
+
+    let img = imageCache.get(src);
+    if (!img) {
+        img = new Image();
+        img.src = src;
+        imageCache.set(src, img);
+        // Will render on next frame once loaded
+        return;
+    }
+
+    if (!img.complete || img.naturalWidth === 0) return;
+
+    // Scale to fit slotW x lineHeight maintaining aspect ratio
+    const aspect = img.naturalWidth / img.naturalHeight;
+    let drawW = slotW;
+    let drawH = slotW / aspect;
+    if (drawH > lineHeight) {
+        drawH = lineHeight;
+        drawW = lineHeight * aspect;
+    }
+    const dx = slotX + (slotW - drawW) / 2;
+    const dy = drawY + (lineHeight - drawH) / 2;
+    ctx.drawImage(img, dx, dy, drawW, drawH);
+}
+
+function renderSvgSlot(
+    ctx: CanvasRenderingContext2D,
+    slot: SvgSlot,
+    slotX: number,
+    drawY: number,
+    slotW: number,
+    lineHeight: number,
+): void {
+    const markup = slot.markup;
+    if (!markup) return;
+
+    let img = svgCache.get(markup);
+    if (!img) {
+        const blob = new Blob([markup], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        img = new Image();
+        img.src = url;
+        svgCache.set(markup, img);
+        img.onload = () => URL.revokeObjectURL(url);
+        return;
+    }
+
+    if (!img.complete || img.naturalWidth === 0) return;
+
+    const aspect = img.naturalWidth / img.naturalHeight;
+    let drawW = slot.width || slotW;
+    let drawH = slot.height || (drawW / aspect);
+    if (drawH > lineHeight) {
+        drawH = lineHeight;
+        drawW = lineHeight * aspect;
+    }
+    if (drawW > slotW) {
+        drawW = slotW;
+        drawH = slotW / aspect;
+    }
+    const dx = slotX + (slotW - drawW) / 2;
+    const dy = drawY + (lineHeight - drawH) / 2;
+    ctx.drawImage(img, dx, dy, drawW, drawH);
 }
 
 export function drawNodes(
@@ -298,56 +652,42 @@ export function drawNodes(
             ctx.rect(bounds.x + 4, contentY + 2, bounds.width - 8, contentH - 4);
             ctx.clip();
 
-            const now = performance.now();
+            const slotNow = performance.now();
             const slotCount = content.slots.size;
             const lineHeight = Math.min(contentH - 4, Math.max(14, (contentH - 4) / slotCount));
+            const slotX = bounds.x + 8;
+            const slotW = bounds.width - 16;
             let yOffset = 0;
 
             for (const [slotName, slot] of content.slots) {
                 const drawY = contentY + 4 + yOffset;
 
-                // Font
-                const fontSize = slot.size || 11;
-                const fontFamily = slot.font || 'monospace';
-                ctx.font = `${fontSize}px ${fontFamily}`;
-
-                // Alignment
-                const align = (slot.align || 'left') as CanvasTextAlign;
-                ctx.textAlign = align;
-                let textX: number;
-                if (align === 'center') {
-                    textX = bounds.x + bounds.width / 2;
-                } else if (align === 'right') {
-                    textX = bounds.x + bounds.width - 8;
-                } else {
-                    textX = bounds.x + 8;
-                }
-                ctx.textBaseline = 'top';
-
-                // Color (may be animated)
-                let textColor = slot.color || theme.nodeContentText;
-                const animKey = `${node.id}:${slotName}`;
-                const anim = store.animation.textSlotAnimations.get(animKey);
-
-                if (anim) {
-                    const elapsed = now - anim.startTime;
-                    const t = Math.min(1, elapsed / anim.duration);
-
-                    if (anim.type === 'flash') {
-                        // Show animation color, fade back
-                        textColor = t < 0.5 ? anim.color : (slot.color || theme.nodeContentText);
-                    } else if (anim.type === 'pulse') {
-                        const alpha = 0.3 + 0.7 * Math.abs(Math.sin(elapsed * 0.01));
-                        ctx.globalAlpha = alpha;
-                        textColor = anim.color;
-                    }
-                }
-
-                ctx.fillStyle = textColor;
-                ctx.fillText(slot.text, textX, drawY);
-
-                if (anim?.type === 'pulse') {
-                    ctx.globalAlpha = 1;
+                switch (slot.type) {
+                    case 'progress':
+                        renderProgressSlot(ctx, store, theme, node.id, slotName, slot, slotX, drawY, slotW, lineHeight);
+                        break;
+                    case 'led':
+                        renderLedSlot(ctx, theme, slot, slotX, drawY, slotW, lineHeight);
+                        break;
+                    case 'spinner':
+                        renderSpinnerSlot(ctx, theme, slot, slotX, drawY, slotW, lineHeight);
+                        break;
+                    case 'badge':
+                        renderBadgeSlot(ctx, store, theme, node.id, slotName, slot, slotX, drawY, slotW, lineHeight, slotNow);
+                        break;
+                    case 'sparkline':
+                        renderSparklineSlot(ctx, theme, slot, slotX, drawY, slotW, lineHeight);
+                        break;
+                    case 'image':
+                        renderImageSlot(ctx, slot, slotX, drawY, slotW, lineHeight);
+                        break;
+                    case 'svg':
+                        renderSvgSlot(ctx, slot as SvgSlot, slotX, drawY, slotW, lineHeight);
+                        break;
+                    default:
+                        // 'text' or legacy slots without type
+                        renderTextSlot(ctx, store, theme, node.id, slotName, slot as TextSlot, bounds, slotX, drawY, lineHeight, slotNow);
+                        break;
                 }
 
                 yOffset += lineHeight;
