@@ -6,8 +6,11 @@ node:add_output("out", "Output", "string")
 node:define_config("period", "2000", "Period (ms)")
 
 function node:on_init()
-    local period = tonumber(self.config.period) or 2000
-    self:init_tick(period)
+    self:init_tick(tonumber(self.config.period) or 2000)
+end
+
+function node:on_config()
+    self:init_tick(tonumber(self.config.period) or 2000)
 end
 
 function node:on_tick()

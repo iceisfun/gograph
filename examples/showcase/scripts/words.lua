@@ -27,6 +27,10 @@ function node:on_init()
     self:init_tick(tonumber(self.config.delay) or 5000)
 end
 
+function node:on_config()
+    self:init_tick(tonumber(self.config.delay) or 5000)
+end
+
 function node:on_tick()
     self.state.idx = ((self.state.idx or 0) % #phrases) + 1
     self:emit("out", phrases[self.state.idx])

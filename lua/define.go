@@ -208,6 +208,7 @@ func buildDefineBinding(def *defineContext) *vm.Table {
 	node.SetString("on_event", noop)
 	node.SetString("on_tick", noop)
 	node.SetString("on_click", noop)
+	node.SetString("on_config", noop)
 	node.SetString("on_connect", noop)
 	node.SetString("on_disconnect", noop)
 	node.SetString("on_init", noop)

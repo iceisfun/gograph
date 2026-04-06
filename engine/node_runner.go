@@ -162,6 +162,7 @@ func (nr *nodeRunner) handleControl(msg ControlMsg) bool {
 				nr.config[k] = v
 				nr.nvm.ConfigTbl.SetString(k, golua.GoToLuaValue(v))
 			}
+			golua.CallHandler(nr.nvm.VM, nr.nvm.NodeTbl, "on_config", nil)
 		}
 
 	case CtrlConnect:

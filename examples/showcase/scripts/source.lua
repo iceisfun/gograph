@@ -7,8 +7,11 @@ node:define_config("message", "Hello, World!", "message")
 node:define_config("interval", "5000", "interval")
 
 function node:on_init()
-    local interval = tonumber(self.config.interval) or 5000
-    self:init_tick(interval)
+    self:init_tick(tonumber(self.config.interval) or 5000)
+end
+
+function node:on_config()
+    self:init_tick(tonumber(self.config.interval) or 5000)
 end
 
 function node:on_tick()
