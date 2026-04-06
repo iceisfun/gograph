@@ -1,7 +1,161 @@
 # Node Binding
 
-Every Lua script receives a metatable-backed `node` global. Scripts define
-event handlers on it — the engine calls the right handler when things happen.
+Every Lua script receives a metatable-backed `node` global. The script
+has two phases: a **define phase** (top-level code that declares the node
+type's shape) and a **runtime phase** (handler functions called by the engine).
+
+## Define Phase — Node Type Setup
+
+Top-level code runs once when the node type is registered via
+`golua.Register(reg, name, script)`. It declares the node's label,
+category, slots, config schema, and visual properties.
+
+### node:set_label(label)
+
+Sets the default display label for the node title bar.
+
+```lua
+node:set_label("My Sensor")
+```
+
+### node:set_category(category)
+
+Sets the category. The frontend uses category to pick **node colors** —
+each category gets its own fill, stroke, and title bar color from the
+theme.
+
+```lua
+node:set_category("source")
+```
+
+Built-in theme categories and their colors:
+
+| Category | Fill | Stroke | Use for |
+|----------|------|--------|---------|
+| `source` | dark green | `#0f6040` | Data generators, oscillators, timers |
+| `transform` | dark purple | `#5f3460` | String ops, math, filters |
+| `output` | dark orange | `#b05020` | Displays, sinks, printers |
+| `delay` | dark yellow | `#a09020` | Delays, rate limiters, queues |
+| `logic` | dark blue | `#3060a0` | AND/OR/XOR, gates, switches |
+
+Nodes with an unrecognized category use the default theme colors. You
+can define custom categories — they just need a matching entry in the
+theme's `nodeCategories` map.
+
+### node:set_content_height(pixels)
+
+Sets the height of the content area below the title bar and slots.
+Required for `display()` to render anything.
+
+```lua
+node:set_content_height(40)   -- enough for 2 text lines
+node:set_content_height(120)  -- dashboard with progress, LEDs, sparkline
+```
+
+### node:set_interactive(bool)
+
+Marks the node as clickable. Interactive nodes render a click button
+in the content area and fire `on_click()` when the user clicks.
+
+```lua
+node:set_interactive(true)
+```
+
+### node:add_input(id, name, dataType)
+
+Declares an input slot. The `dataType` determines connection kind:
+state-like types (`"state"`, `"bool"`, `"coil"`) create state connections;
+event-like types (`"any"`, `"string"`, `"number"`) create event connections.
+
+```lua
+node:add_input("in", "Input", "any")        -- event input
+node:add_input("enable", "Enable", "state")  -- state input
+```
+
+### node:add_output(id, name, dataType)
+
+Declares an output slot. Same dataType rules as inputs.
+
+```lua
+node:add_output("out", "Output", "any")      -- use self:emit()
+node:add_output("coil", "Coil", "state")     -- use self:set()
+```
+
+### node:define_config(key, default, label)
+
+Declares a user-editable config field. All config values are strings.
+
+```lua
+node:define_config("period", "2000", "Period (ms)")
+node:define_config("threshold", "50", "Threshold")
+node:define_config("message", "Hello", "Message")
+```
+
+### Complete define example
+
+```lua
+-- Top-level code: define phase
+node:set_label("Rate Limit")
+node:set_category("transform")
+node:set_content_height(50)
+node:add_input("in", "Input", "any")
+node:add_output("out", "Output", "any")
+node:define_config("rate", "2000", "Rate (ms)")
+
+-- Handler definitions follow...
+function node:on_init()
+    -- ...
+end
+```
+
+## Lifecycle Handlers
+
+### function node:on_init()
+
+Called once when the node runner starts. Use it to initialize persistent
+state and start periodic ticks.
+
+```lua
+function node:on_init()
+    self.state.count = 0
+    self:init_tick(tonumber(self.config.period) or 5000)
+    self:set_label("Counter 0")
+end
+```
+
+### function node:on_shutdown()
+
+Called when the node runner is stopped (graph removed, engine shut down).
+Use for cleanup logging.
+
+```lua
+function node:on_shutdown()
+    self:log("shutting down with count=" .. tostring(self.state.count))
+end
+```
+
+### function node:on_config()
+
+Called when the node's config changes at runtime (user edits via the UI).
+Use it to reconfigure ticks, update labels, etc.
+
+```lua
+function node:on_config()
+    self:init_tick(tonumber(self.config.period) or 5000)
+    self:set_label("Timer " .. self.config.period .. "ms")
+end
+```
+
+### function node:on_connect(e) / function node:on_disconnect(e)
+
+Called when a connection is added or removed. The `e` table has
+`e.connection` with the connection details.
+
+```lua
+function node:on_connect(e)
+    self:log("connected: " .. e.connection.from_node .. " -> " .. e.connection.to_node)
+end
+```
 
 ## Event Handlers
 
@@ -241,6 +395,120 @@ self:log("processing started")
 -- output: [osc1] processing started
 ```
 
+## Ticks and Scheduling
+
+Ticks are the primary mechanism for source nodes that generate data on
+their own schedule, and for deferred operations like delays and rate
+limiting.
+
+### self:init_tick(ms)
+
+Starts a **recurring** periodic tick. The engine calls `on_tick()` every
+`ms` milliseconds. Calling `init_tick` again replaces the previous
+interval.
+
+```lua
+function node:on_init()
+    self:init_tick(2000)  -- tick every 2 seconds
+end
+
+function node:on_tick()
+    self:emit("out", tostring(time.now()))
+end
+
+function node:on_config()
+    -- Reconfigure when user changes the interval
+    self:init_tick(tonumber(self.config.interval) or 2000)
+end
+```
+
+### self:schedule_tick(ms)
+
+Schedules a **one-shot** tick after `ms` milliseconds. When it fires,
+the engine calls `on_tick()` once. Use `0` for an immediate tick on the
+next loop iteration.
+
+Unlike `init_tick`, a scheduled tick does not repeat — you must call
+`schedule_tick` again if you want another one.
+
+```lua
+function node:on_event(e)
+    -- Received data, emit it after a delay
+    self.state.pending = e.value
+    local delay = tonumber(self.config.delay) or 1000
+    self:schedule_tick(delay)
+end
+
+function node:on_tick()
+    if self.state.pending then
+        self:emit("out", self.state.pending)
+        self.state.pending = nil
+    end
+end
+```
+
+### Combining recurring and one-shot ticks
+
+Both can coexist. `init_tick` runs independently on its own timer;
+`schedule_tick` fires through a separate channel. Both call `on_tick()`
+— use `self.state` to distinguish what triggered the tick if needed.
+
+```lua
+function node:on_init()
+    self:init_tick(5000)  -- periodic heartbeat
+end
+
+function node:on_event(e)
+    -- Also schedule an immediate re-evaluation
+    self:schedule_tick(0)
+end
+
+function node:on_tick()
+    -- Called by both init_tick (periodic) and schedule_tick (one-shot)
+    self:emit("out", tostring(self.state.count or 0))
+end
+```
+
+### function node:on_tick()
+
+Called by both `init_tick` (periodic) and `schedule_tick` (one-shot).
+This is where source nodes generate data, and where deferred operations
+complete.
+
+```lua
+function node:on_tick()
+    local period = tonumber(self.config.period) or 2000
+    local phase = math.floor(time.now() / period) % 2
+    self:set("out", phase == 0 and "1" or "0")
+    self:display(phase == 0 and "ON" or "OFF")
+end
+```
+
+## Persistent State
+
+`self.state` is a Lua table that persists across handler calls for the
+lifetime of the node runner. It is **not** persisted to the store — it
+resets when the engine restarts.
+
+```lua
+function node:on_init()
+    self.state.count = 0
+    self.state.history = {}
+    self.state.last_emit = 0
+end
+
+function node:on_tick()
+    self.state.count = self.state.count + 1
+    self:display(tostring(self.state.count))
+end
+```
+
+Use `self.state` for:
+- Counters, accumulators
+- Queue buffers (head/tail indices)
+- Previous values for change detection
+- Timekeeping (last emit time for rate limiting)
+
 ## Connections
 
 ```lua
@@ -260,96 +528,221 @@ end
 
 ## Complete Examples
 
-### Source node
+### Periodic source with dynamic label
 
 ```lua
--- oscillator.lua
-function node:on_event(e)
-    local period = tonumber(self.config.period) or 2000
-    local phase = math.floor(time.now() / period) % 2
-    self.outputs.out = phase == 0 and "1" or "0"
-    self:display(phase == 0 and "ON" or "OFF")
+node:set_label("Source")
+node:set_category("source")
+node:set_content_height(30)
+node:add_output("out", "Output", "any")
+node:define_config("message", "Hello", "Message")
+node:define_config("interval", "5000", "Interval (ms)")
+
+function node:on_init()
+    self:init_tick(tonumber(self.config.interval) or 5000)
+    self:set_label("Source: " .. (self.config.message or "Hello"))
+end
+
+function node:on_config()
+    self:init_tick(tonumber(self.config.interval) or 5000)
+    self:set_label("Source: " .. (self.config.message or "Hello"))
+end
+
+function node:on_tick()
+    local msg = self.config.message or "Hello"
+    self:emit("out", msg)
+    self:display(msg)
 end
 ```
 
-### Transform node
+### State oscillator
 
 ```lua
--- lowercase.lua
+node:set_label("Oscillator")
+node:set_category("source")
+node:set_content_height(30)
+node:add_output("out", "Output", "state")
+node:define_config("period", "2000", "Period (ms)")
+
+function node:on_init()
+    self:init_tick(tonumber(self.config.period) or 2000)
+end
+
+function node:on_config()
+    self:init_tick(tonumber(self.config.period) or 2000)
+end
+
+function node:on_tick()
+    local period = tonumber(self.config.period) or 2000
+    local phase = math.floor(time.now() / period) % 2
+    local on = phase == 0
+    self:set("out", on and "1" or "0")
+    self:display(on and "ON" or "OFF")
+end
+```
+
+### Transform with event passthrough
+
+```lua
+node:set_label("Lowercase")
+node:set_category("transform")
+node:add_input("in", "Input", "any")
+node:add_output("out", "Output", "any")
+
 function node:on_event(e)
     local data = e.value or self.inputs["in"]
-    self.outputs.out = string.lower(tostring(data or ""))
+    self:emit("out", string.lower(tostring(data or "")))
+end
+```
+
+### Delay with queued events and one-shot ticks
+
+```lua
+node:set_label("Delay")
+node:set_category("delay")
+node:set_content_height(30)
+node:add_input("in", "Input", "any")
+node:add_output("out", "Output", "any")
+node:define_config("duration", "1000", "Duration (ms)")
+
+function node:on_init()
+    self.state.qh = 1
+    self.state.qt = 1
+end
+
+function node:on_event(e)
+    local ms = tonumber(self.config.duration) or 1000
+    local val = e.value or self.inputs["in"]
+    self.state[self.state.qt] = { value = val, at = time.now() + ms }
+    self.state.qt = self.state.qt + 1
+    self:schedule_tick(ms)  -- one-shot: fire after delay
+end
+
+function node:on_tick()
+    local now = time.now()
+    while self.state.qh < self.state.qt do
+        local entry = self.state[self.state.qh]
+        if entry.at > now then
+            self:schedule_tick(entry.at - now)  -- re-schedule for next item
+            return
+        end
+        self:emit("out", entry.value)
+        self.state[self.state.qh] = nil
+        self.state.qh = self.state.qh + 1
+    end
 end
 ```
 
 ### Interactive toggle with state output
 
 ```lua
--- toggle.lua (uses set() for state output)
+node:set_label("Toggle")
+node:set_category("source")
+node:set_interactive(true)
+node:set_content_height(40)
+node:add_output("out", "Output", "state")
+
+function node:update_state()
+    local on = self.config.state == "on"
+    self:set("out", on and "1" or "0")
+    self:display(on and "ON" or "OFF")
+end
+
+function node:on_init()
+    self:update_state()
+end
+
 function node:on_click()
     if self.config.state == "on" then
         self:set_config("state", "off")
     else
         self:set_config("state", "on")
     end
-end
-
-function node:on_event(e)
-    local on = self.config.state == "on"
-    self:set("out", on and "1" or "0")
-    self:display(on and "ON" or "OFF")
+    self:update_state()
 end
 ```
 
-### State logic gate
+### State logic gate (AND)
 
 ```lua
--- and_gate.lua (reacts to state input changes)
-function node:on_change(e)
-    local a = self.inputs.a
-    local b = self.inputs.b
-    self:set("out", (a == "1" and b == "1") and "1" or "0")
-end
-```
+node:set_label("AND")
+node:set_category("logic")
+node:set_content_height(30)
+node:add_input("a", "A", "state")
+node:add_input("b", "B", "state")
+node:add_output("out", "Output", "state")
 
-### State source
-
-```lua
--- oscillator.lua (state output with set())
-function node:on_event(e)
-    local period = tonumber(self.config.period) or 2000
-    local phase = math.floor(time.now() / period) % 2
-    self:set("out", phase == 0 and "1" or "0")
-    self:display(phase == 0 and "ON" or "OFF")
-end
-```
-
-### Multi-output node
-
-```lua
--- shift_register.lua
-function node:on_event(e)
-    local bits = tonumber(self.config.bits) or 8
-    for i = 0, bits - 1 do
-        self.outputs["b" .. i] = (i == pos) and "1" or "0"
-    end
-    self:display(table.concat(display))
-end
-```
-
-## Top-Level Code
-
-Code outside handlers runs once during script setup. Use it for helper
-functions or shared constants:
-
-```lua
 local function truthy(v)
     return v == "1" or v == "true" or v == "on"
 end
 
+function node:on_change(e)
+    local r = truthy(self.inputs.a) and truthy(self.inputs.b)
+    self:set("out", r and "1" or "0")
+    self:display(r and "1" or "0")
+end
+```
+
+### Mixed node: state enable + event passthrough
+
+```lua
+node:set_label("Switch")
+node:set_category("transform")
+node:set_content_height(30)
+node:add_input("en", "Enable", "state")
+node:add_input("in", "Data", "any")
+node:add_output("out", "Output", "any")
+node:add_output("discard", "Discard", "any")
+
+function node:on_change(e)
+    -- State input changed — update display
+    local enabled = self.inputs.en == "1"
+    self:display(enabled and "OPEN" or "CLOSED")
+end
+
 function node:on_event(e)
-    local a = truthy(self.inputs.a)
-    local b = truthy(self.inputs.b)
-    self.outputs.out = (a and b) and "1" or "0"
+    -- Event input arrived — route based on enable state
+    local enabled = self.inputs.en == "1"
+    local val = e.value or self.inputs["in"]
+    if enabled then
+        self:emit("out", val)
+    else
+        self:emit("discard", val)
+    end
+end
+```
+
+### Dashboard with rich display slots
+
+```lua
+node:set_label("Dashboard")
+node:set_category("output")
+node:set_content_height(120)
+node:define_config("interval", "2000", "Interval (ms)")
+
+function node:on_init()
+    self.state.step = 0
+    self:init_tick(tonumber(self.config.interval) or 2000)
+    self:display("status", { type="badge", text="INIT", background="#3498db" })
+    self:display("bar", { type="progress", value=0 })
+end
+
+function node:on_tick()
+    self.state.step = (self.state.step or 0) + 1
+    local step = self.state.step
+    local interval = tonumber(self.config.interval) or 2000
+
+    -- Progress bar cycles 0..1
+    self:display("bar", { type="progress", value=(step % 8) / 8, duration=interval })
+
+    -- Badge cycles through states
+    local badges = {
+        { text="OK",   bg="#2ecc71" },
+        { text="BUSY", bg="#f39c12" },
+        { text="WARN", bg="#e67e22" },
+        { text="ERR",  bg="#e74c3c" },
+    }
+    local b = badges[(step % 4) + 1]
+    self:display("status", { type="badge", text=b.text, color="#fff", background=b.bg })
 end
 ```
