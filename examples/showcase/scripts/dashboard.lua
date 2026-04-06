@@ -1,7 +1,7 @@
 -- Type definition
 node:set_label("Dashboard")
 node:set_category("output")
-node:set_content_height(120)
+node:set_content_height(200)
 node:add_input("in", "Input", "any")
 node:define_config("interval", "2000", "Update interval (ms)")
 
