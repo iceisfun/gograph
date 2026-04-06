@@ -19,6 +19,8 @@ toggle -----[state]--/  (state enable + event data passthrough)
 
 toggle --[state]--> AND gate --[state]--> output
 oscillator ------/
+
+dashboard (display slot types demo: progress, LEDs, sparkline, badge, spinner)
 ```
 
 ## Running
@@ -46,3 +48,4 @@ go run . -dev -addr :8080
 - **Node border animations** -- nodes pulse when they are executing.
 - **Per-node duration** -- the delay nodes have different durations (500ms vs 1500ms), so their connection animations move at different speeds.
 - **Multiple paths** -- src1 fans out to two independent pipelines; src2 feeds a separate chain. All paths animate concurrently.
+- **Display slot types** -- the dashboard node demonstrates rich content slots: progress bars, LED indicators, sparklines, badges, and spinners rendered inside node bodies.

@@ -29,7 +29,9 @@ SKILLS:
 - Lua define phase: node:set_label(), node:set_category(), node:add_input(id, name, dataType), node:add_output(id, name, dataType), node:define_config(key, default, label).
 - Lua event handlers: on_event(e), on_tick(), on_click(), on_init(), on_config(), on_connect(e), on_disconnect(e).
 - Lua state handlers: on_change(e) with e.value/e.prev/e.slot/e.source, on_high(e), on_low(e).
-- Lua methods: self:emit(slot, val), self:set(slot, val), self:display(text) or self:display(slotName, text, opts), self:glow(ms), self:set_config(k,v), self:set_label(label), self:log(msg), self:init_tick(ms), self:schedule_tick(ms).
+- Lua methods: self:emit(slot, val), self:set(slot, val), self:display(text) or self:display(slotName, text, opts) or self:display(slotName, opts), self:glow(ms), self:set_config(k,v), self:set_label(label), self:log(msg), self:init_tick(ms), self:schedule_tick(ms).
+- ContentSlot is an interface with 8 concrete types: TextSlot, ProgressSlot, LedSlot, SpinnerSlot, BadgeSlot, SparklineSlot, ImageSlot, SvgSlot. All share BaseSlot (Type, Color, Animate, Duration). Polymorphic JSON with "type" discriminator.
+- Display slot types: text (default styled text), progress (bar 0..1), led (indicator circles), spinner (rotating arc), badge (colored pill), sparkline (inline chart), image (data URI), svg (blob URL).
 - Lua state: self.inputs, self.config, self.state (persistent across handler calls), self.incoming, self.outgoing.
 - REST API at /api/graphs/{id}/... for CRUD. SSE at /api/graphs/{id}/events for real-time updates.
 - Embeddable via server.WithRoutePrefix("/graph"). Embedded frontend via server.WithStaticFS(frontend.FS()).
@@ -149,11 +151,20 @@ self:emit("out1", value)
 -- Set continuous state on an output slot
 self:set("out1", value)
 
--- Display text on the node body
+-- Display text on the node body (default text slot)
 self:display("Hello")
 
 -- Display text in a named slot with options
 self:display("slotName", "text", { color = "#fff" })
+
+-- Display typed slots (progress, led, spinner, badge, sparkline, image, svg)
+self:display("bar", { type = "progress", value = 0.75, duration = 2000, color = "#4CAF50" })
+self:display("leds", { type = "led", states = {true, false, true} })
+self:display("loading", { type = "spinner", visible = true })
+self:display("status", { type = "badge", text = "OK", color = "#fff", background = "#2ecc71" })
+self:display("chart", { type = "sparkline", values = {1.2, 1.5, 1.3} })
+self:display("icon", { type = "image", src = "data:...", width = 24, height = 24 })
+self:display("logo", { type = "svg", markup = "<svg>...</svg>", width = 32, height = 32 })
 
 -- Visual glow effect (milliseconds)
 self:glow(500)
@@ -253,6 +264,24 @@ function node:on_config()
     end
 end
 ```
+
+## Display Slot Types
+
+The `display()` method supports 8 visual slot types via the `ContentSlot` interface.
+Each type has its own canvas renderer. The `type` field in the opts table selects the type.
+
+| Type | Lua Usage | Visual |
+|------|-----------|--------|
+| `text` | `self:display("name", "text", {color, size, align, font, animate, duration})` | Styled text (default) |
+| `progress` | `self:display("name", {type="progress", value=0.75, duration=2000, color="#4CAF50"})` | Animated bar 0..1 |
+| `led` | `self:display("name", {type="led", states={true, false, true}})` | Row of indicator circles |
+| `spinner` | `self:display("name", {type="spinner", visible=true})` | Rotating arc |
+| `badge` | `self:display("name", {type="badge", text="OK", color="#fff", background="#2ecc71"})` | Colored pill |
+| `sparkline` | `self:display("name", {type="sparkline", values={1.2, 1.5, 1.3}})` | Inline chart |
+| `image` | `self:display("name", {type="image", src="data:...", width=24, height=24})` | Inline image |
+| `svg` | `self:display("name", {type="svg", markup="<svg>...</svg>", width=32, height=32})` | SVG via blob URL |
+
+All share `BaseSlot` with `Type`, `Color`, `Animate`, `Duration`. Polymorphic JSON with `"type"` discriminator.
 
 ## Common Patterns
 

@@ -96,6 +96,15 @@ function node:on_change(e)
 end
 ```
 
+Nodes can display rich visual content using 8 slot types: text, progress
+bars, LED indicators, spinners, badges, sparklines, images, and SVGs.
+
+```lua
+self:display("bar", { type = "progress", value = 0.75, color = "#4CAF50" })
+self:display("leds", { type = "led", states = {true, false, true} })
+self:display("chart", { type = "sparkline", values = {1.2, 1.5, 1.3} })
+```
+
 Each execution runs in a fresh sandboxed VM with limited instructions and
 no file system or network access.
 

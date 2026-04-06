@@ -9,7 +9,9 @@
 //     and the SSE wire protocol event types. [graph.Connection] is an
 //     interface with two concrete types: [graph.EventConnection] (discrete
 //     messages with dot animation) and [graph.StateConnection] (continuous
-//     state with steady glow).
+//     state with steady glow). [graph.ContentSlot] is an interface with
+//     8 concrete slot types (TextSlot, ProgressSlot, LedSlot, SpinnerSlot,
+//     BadgeSlot, SparklineSlot, ImageSlot, SvgSlot) for rich node display.
 //   - [engine] provides goroutine-per-node graph execution with channel-based
 //     connections and emits real-time events for visualization.
 //   - [lua] implements node execution using embedded Lua (golua), providing

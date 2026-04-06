@@ -10,6 +10,11 @@
 //     with optional traversal animation) and [StateConnection] (continuous
 //     state with change detection). [ConnectionKind] distinguishes them,
 //     and [SlotConnectionKind] determines the kind from a slot's DataType.
+//   - [ContentSlot] is an interface for node display content with 8 concrete
+//     types: [TextSlot], [ProgressSlot], [LedSlot], [SpinnerSlot],
+//     [BadgeSlot], [SparklineSlot], [ImageSlot], and [SvgSlot]. All share
+//     [BaseSlot] with Type, Color, Animate, and Duration fields.
+//     Polymorphic JSON encoding uses a "type" discriminator.
 //
 // Node types are managed through a [Registry]. Each [NodeType] declares its
 // slots (inputs and outputs) and optionally a Lua script for execution.

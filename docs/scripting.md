@@ -102,8 +102,9 @@ self.outgoing       -- array of Connection objects
 -- Methods
 self:emit(slot, val)   -- send event output (discrete message)
 self:set(slot, val)    -- set state output (change-detected)
-self:display(text)     -- set node display content (default slot)
-self:display(slot, text, opts) -- named slot with style options
+self:display(text)     -- set node display content (default text slot)
+self:display(slot, text, opts) -- named text slot with style options
+self:display(slot, opts)       -- named typed slot (progress, led, etc.)
 self:set_label(label)  -- update display label at runtime
 self:glow(ms)          -- trigger glow animation
 self:set_config(k, v)  -- update config (persisted by engine)
@@ -115,6 +116,80 @@ Connection objects have: `id`, `from_node`, `from_slot`, `to_node`,
 
 See [node.md](node.md), [connection.md](connection.md), and
 [event.md](event.md) for full API documentation.
+
+## Display Slot Types
+
+The `display()` method supports 8 visual slot types via the
+`ContentSlot` interface. Each type has its own canvas renderer and
+fields. The `type` field in the opts table selects the concrete type.
+
+### text (default)
+
+Styled text. Used when calling `display(text)` or `display(name, text, opts)`.
+
+```lua
+self:display("ON")
+self:display("status", "ACTIVE", { color = "#0f0", animate = "pulse", duration = 500 })
+```
+
+### progress
+
+Animated progress bar with a value from 0 to 1.
+
+```lua
+self:display("bar", { type = "progress", value = 0.75, duration = 2000, color = "#4CAF50" })
+```
+
+### led
+
+Row of indicator circles.
+
+```lua
+self:display("leds", { type = "led", states = {true, false, true} })
+```
+
+### spinner
+
+Rotating arc animation.
+
+```lua
+self:display("loading", { type = "spinner", visible = true })
+```
+
+### badge
+
+Colored pill label.
+
+```lua
+self:display("status", { type = "badge", text = "OK", color = "#fff", background = "#2ecc71" })
+```
+
+### sparkline
+
+Inline mini-chart from an array of numbers.
+
+```lua
+self:display("chart", { type = "sparkline", values = {1.2, 1.5, 1.3, 1.8, 1.1} })
+```
+
+### image
+
+Inline raster image from a data URI.
+
+```lua
+self:display("icon", { type = "image", src = "data:image/png;base64,...", width = 24, height = 24 })
+```
+
+### svg
+
+SVG content rendered via blob URL.
+
+```lua
+self:display("logo", { type = "svg", markup = "<svg>...</svg>", width = 32, height = 32 })
+```
+
+All types share `BaseSlot` fields: `Type`, `Color`, `Animate`, `Duration`.
+Polymorphic JSON uses the `"type"` discriminator.
 
 ## Script Patterns
 

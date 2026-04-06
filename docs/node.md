@@ -155,25 +155,60 @@ SSE event.
 self:set_label("Switch (ON)")
 ```
 
-### self:display(text)  /  self:display(slotName, text, opts)
+### self:display(text)  /  self:display(slotName, text, opts)  /  self:display(slotName, opts)
 
-Sets the text content rendered inside the node body on the canvas.
+Sets visual content rendered inside the node body on the canvas. The
+`ContentSlot` interface supports 8 concrete slot types, each with its
+own canvas renderer.
+
+**Single-argument form** (default text slot):
 
 ```lua
 self:display("ON")
 self:display(tostring(count))
 ```
 
-Named-slot form with optional style table:
+**Named text slot** with optional style table:
 
 ```lua
 self:display("status", "ACTIVE", { color = "#0f0", animate = "pulse", duration = 500 })
 self:display("value", tostring(reading))
 ```
 
-Accepts strings and numbers. Triggers a `node.content` SSE event with
-change detection (only emits when the display value actually changes).
-See [event.md](event.md) for the full list of style options.
+**Typed slot** via opts table (for non-text slot types):
+
+```lua
+self:display("progress", { type = "progress", value = 0.75, duration = 2000, color = "#4CAF50" })
+self:display("leds", { type = "led", states = {true, false, true} })
+self:display("loading", { type = "spinner", visible = true })
+self:display("status", { type = "badge", text = "OK", color = "#fff", background = "#2ecc71" })
+self:display("chart", { type = "sparkline", values = {1.2, 1.5, 1.3, 1.8, 1.1} })
+self:display("icon", { type = "image", src = "data:image/png;base64,...", width = 24, height = 24 })
+self:display("logo", { type = "svg", markup = "<svg>...</svg>", width = 32, height = 32 })
+```
+
+See [event.md](event.md) for the full list of slot types and their
+fields. Accepts strings and numbers for text slots. Triggers a
+`node.content` SSE event with change detection (only emits when the
+display value actually changes).
+
+#### Display Slot Types
+
+All slot types share a `BaseSlot` with `Type`, `Color`, `Animate`, and
+`Duration` fields. The `type` field in the opts table selects the
+concrete type. JSON uses a `"type"` discriminator for polymorphic
+encoding.
+
+| Type | Description | Key Fields |
+|------|-------------|------------|
+| `text` | Styled text (default) | `color`, `size`, `align`, `font`, `animate`, `duration` |
+| `progress` | Animated progress bar (0..1) | `value`, `duration`, `color` |
+| `led` | Row of indicator circles | `states` (array of booleans) |
+| `spinner` | Rotating arc animation | `visible` |
+| `badge` | Colored pill label | `text`, `color`, `background` |
+| `sparkline` | Inline mini-chart | `values` (array of numbers) |
+| `image` | Inline raster image | `src` (data URI), `width`, `height` |
+| `svg` | SVG rendered via blob URL | `markup`, `width`, `height` |
 
 ### self:glow(duration_ms)
 

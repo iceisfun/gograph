@@ -169,26 +169,34 @@ via a `node.update` SSE event.
 self:set_label("Switch (ON)")
 ```
 
-### self:display(text)  /  self:display(slotName, text, opts)
+### self:display(text)  /  self:display(slotName, text, opts)  /  self:display(slotName, opts)
 
-Emits a `node.content` SSE event that updates text rendered inside
-the node body on the canvas.
+Emits a `node.content` SSE event that updates visual content rendered
+inside the node body on the canvas. The `ContentSlot` interface supports
+8 concrete slot types, each with its own canvas renderer.
 
-**Single-argument form** (default slot):
+**Single-argument form** (default text slot):
 
 ```lua
 self:display("ON")
 self:display(tostring(42))
 ```
 
-**Named-slot form** with optional style table:
+**Named text slot** with optional style table:
 
 ```lua
 self:display("status", "ACTIVE", { color = "#0f0", animate = "pulse", duration = 500 })
 self:display("value", tostring(reading))
 ```
 
-Style options:
+**Typed slot** via opts table:
+
+```lua
+self:display("bar", { type = "progress", value = 0.75, duration = 2000, color = "#4CAF50" })
+self:display("leds", { type = "led", states = {true, false, true} })
+```
+
+#### Text Slot Style Options
 
 | Key        | Type   | Description                              |
 |------------|--------|------------------------------------------|
@@ -199,12 +207,29 @@ Style options:
 | `animate`  | string | `"flash"`, `"pulse"`, or `"none"`        |
 | `duration` | number | Animation duration in ms                 |
 
+#### Content Slot Types
+
+All slot types share a `BaseSlot` with `Type`, `Color`, `Animate`, and
+`Duration` fields. The `type` field in the opts table selects the
+concrete type. Polymorphic JSON uses a `"type"` discriminator.
+
+| Type | Go Struct | Lua Usage | Visual |
+|------|-----------|-----------|--------|
+| `text` | `TextSlot` | `self:display("name", "text", {color, size, align, font, animate, duration})` | Styled text (default) |
+| `progress` | `ProgressSlot` | `self:display("name", {type="progress", value=0.75, duration=2000, color="#4CAF50"})` | Animated bar 0..1 |
+| `led` | `LedSlot` | `self:display("name", {type="led", states={true, false, true}})` | Row of indicator circles |
+| `spinner` | `SpinnerSlot` | `self:display("name", {type="spinner", visible=true})` | Rotating arc |
+| `badge` | `BadgeSlot` | `self:display("name", {type="badge", text="OK", color="#fff", background="#2ecc71"})` | Colored pill |
+| `sparkline` | `SparklineSlot` | `self:display("name", {type="sparkline", values={1.2, 1.5, 1.3}})` | Inline chart |
+| `image` | `ImageSlot` | `self:display("name", {type="image", src="data:...", width=24, height=24})` | Inline image |
+| `svg` | `SvgSlot` | `self:display("name", {type="svg", markup="<svg>...</svg>", width=32, height=32})` | SVG rendered via blob URL |
+
 **Change detection**: The engine tracks the last display value per slot.
-If the script sets the same display text and options as the previous
+If the script sets the same display content and options as the previous
 execution, no SSE event is emitted.
 
 **Type**: `node.content`
-**Payload**: `{ nodeID, slots: { slotName: { text, color, ... } } }`
+**Payload**: `{ nodeID, slots: { slotName: { type, ...slot fields } } }`
 
 ### self:glow(duration_ms)
 
@@ -328,7 +353,7 @@ All events follow the envelope format:
 
 | Type                | Source          | Description                        |
 |---------------------|----------------|------------------------------------|
-| `node.content`      | script/engine  | Node display text changed          |
+| `node.content`      | script/engine  | Node display content changed (polymorphic slots) |
 | `node.active`       | script/engine  | Node glow animation                |
 | `node.update`       | REST API/click | Node added or modified             |
 | `connection.state`  | engine         | Instant wire state changed         |
