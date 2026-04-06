@@ -57,12 +57,17 @@ func WithRegistry(r *graph.Registry) Option {
 	}
 }
 
-// WithEngine sets the execution engine. When set, node clicks trigger
-// immediate forward propagation through instant connections.
+// WithEngine sets the execution engine.
 func WithEngine(eng *engine.Engine) Option {
 	return func(s *Server) {
 		s.engine = eng
 	}
+}
+
+// SetEngine sets the engine after construction (for circular references
+// where the server is the engine's event broker).
+func (s *Server) SetEngine(eng *engine.Engine) {
+	s.engine = eng
 }
 
 // New creates a new server with the given options. If no store is

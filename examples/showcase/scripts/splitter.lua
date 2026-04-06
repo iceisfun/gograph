@@ -1,10 +1,25 @@
-local data = inputs["in"] or ""
-local words = {}
-for w in data:gmatch("%S+") do
-    words[#words + 1] = w
+-- Type definition
+node:set_label("Splitter")
+node:set_category("transform")
+node:set_content_height(30)
+node:add_input("in", "Input", "string")
+node:add_output("out", "Output", "string")
+
+function node:on_event(e)
+    local data = e.value or self.inputs["in"] or ""
+
+    local words = {}
+    for w in data:gmatch("%S+") do
+        words[#words + 1] = w
+    end
+
+    if #words == 0 then
+        return
+    end
+
+    -- Emit each word as a separate event down the connection.
+    for _, w in ipairs(words) do
+        self:emit("out", w)
+    end
+    self:display(#words .. " words")
 end
-if #words == 0 then
-    return { out = "", _display = "(empty)" }
-end
-local idx = math.floor(time.now() / 1000) % #words + 1
-return { out = words[idx], _display = words[idx] .. " [" .. idx .. "/" .. #words .. "]" }

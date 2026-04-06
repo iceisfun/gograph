@@ -9,12 +9,10 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/iceisfun/gograph/engine"
 	"github.com/iceisfun/gograph/frontend"
 	"github.com/iceisfun/gograph/graph"
-	golua "github.com/iceisfun/gograph/lua"
 	"github.com/iceisfun/gograph/server"
 	"github.com/iceisfun/gograph/store"
 )
@@ -32,7 +30,7 @@ func main() {
 		Slots: []graph.Slot{
 			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
 		},
-		Script: `return { out = "hello world" }`,
+		Script: `function node:on_event(e) self:emit("out", "hello world") end`,
 	}))
 	must(reg.Register(graph.NodeType{
 		Name:  "upper",
@@ -49,7 +47,7 @@ func main() {
 		Slots: []graph.Slot{
 			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
 		},
-		Script: `print("received: " .. tostring(inputs["in"])) return {}`,
+		Script: `function node:on_event(e) print("received: " .. tostring(e.value)) end`,
 	}))
 
 	// Create a graph.
@@ -64,15 +62,6 @@ func main() {
 	st := store.NewMemoryStore()
 	must(st.Save(context.Background(), g.ID, g))
 
-	// Set up the engine with Lua executor.
-	luaExec := golua.New(reg)
-	eng := engine.New(g,
-		engine.WithRegistry(reg),
-		engine.WithExecutor(luaExec),
-		engine.WithEventDuration(1500),
-		engine.WithStore(st, g.ID),
-	)
-
 	// Configure the server.
 	opts := []server.Option{
 		server.WithStore(st),
@@ -83,19 +72,17 @@ func main() {
 	} else {
 		opts = append(opts, server.WithStaticFS(frontend.FS()))
 	}
-
 	srv := server.New(opts...)
 
-	// Wire engine events to SSE.
-	sub := eng.Subscribe(64)
-	go func() {
-		for evt := range sub.Events() {
-			srv.Publish(g.ID, evt.Type, evt.Payload)
-		}
-	}()
+	// Engine — server is the event broker.
+	eng := engine.New(
+		engine.WithRegistry(reg),
+		engine.WithStore(st, g.ID),
+		engine.WithBroker(srv),
+	)
+	srv.SetEngine(eng)
 
-	// Start the engine — executes every 5 seconds in the background.
-	eng.Start(context.Background(), 5*time.Second)
+	must(eng.Start(context.Background()))
 	defer eng.Stop()
 
 	fmt.Printf("GoGraph (Lua): http://127.0.0.1%s\n", *addr)

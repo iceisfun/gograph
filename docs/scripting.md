@@ -1,0 +1,293 @@
+# Scripting Guide
+
+GoGraph nodes are scripted in Lua using an embedded
+[GoLua](https://github.com/iceisfun/golua) runtime. Each node type can
+have an attached Lua script that defines event handlers.
+
+## Execution Model
+
+The engine provides a `node` global with base noop handlers. The script
+runs once to define/override handlers and helper functions. Then the
+engine calls the appropriate handler:
+
+1. **Script setup** — top-level code runs (define helpers, override handlers)
+2. **Handler call** — engine calls `on_event(e)` or `on_click()` via ProtectedCall
+3. **Collect results** — outputs, display, glow, config updates are collected
+
+Each execution creates a **fresh sandboxed VM** — no state persists
+between runs. This ensures isolation and predictability.
+
+**Limits**: 1M instructions, 200 call depth, 10K stack slots (configurable).
+
+## Event Handlers
+
+### on_event(e)
+
+The main handler. Called on engine tick, data arrival, or re-evaluation.
+The `e` parameter is a table describing what triggered the call:
+
+| Field          | Type              | Present for                |
+|----------------|-------------------|----------------------------|
+| `e.type`       | string            | always (`"tick"`, `"arrival"`, `"eval"`) |
+| `e.slot`       | string or nil     | arrival only               |
+| `e.value`      | any or nil        | arrival only               |
+| `e.source`     | string or nil     | arrival only               |
+| `e.connection` | Connection or nil | arrival only               |
+
+`self.inputs` always has ALL latest input values (not just the arriving
+one). Use `e.value` for direct access to the value that just arrived.
+
+```lua
+function node:on_event(e)
+    local data = e.value or self.inputs["in"]
+    self.outputs.out = string.lower(tostring(data or ""))
+end
+```
+
+### on_click()
+
+Called when a user clicks an interactive node. Change config here.
+
+```lua
+function node:on_click()
+    if self.config.state == "on" then
+        self:set_config("state", "off")
+    else
+        self:set_config("state", "on")
+    end
+end
+```
+
+After `on_click` returns, the engine persists config changes and
+triggers re-evaluation (which calls `on_event` with `e.type == "eval"`
+and updated config).
+
+## The `node` Object
+
+```
+-- Identity (read-only)
+self.id             -- node instance ID
+self.type           -- node type name
+self.label          -- display label
+
+-- Data
+self.inputs         -- read-only: input values by slot ID (ALL latest values)
+self.config         -- read-only: config key/value pairs (strings)
+self.outputs        -- write-capture: set output values by slot ID
+
+-- Connections (read-only)
+self.incoming       -- array of Connection objects
+self.outgoing       -- array of Connection objects
+
+-- Methods
+self:display(text)     -- set node display content
+self:glow(ms)          -- trigger glow animation
+self:set_config(k, v)  -- update config (persisted by engine)
+self:log(msg)          -- log with node ID prefix
+```
+
+Connection objects have: `id`, `from_node`, `from_slot`, `to_node`,
+`to_slot`, `config`, `duration`.
+
+See [node.md](node.md), [connection.md](connection.md), and
+[event.md](event.md) for full API documentation.
+
+## Script Patterns
+
+### Source Node (no inputs)
+
+Source nodes receive `e.type == "tick"` on each engine tick. The event
+table has no arrival info — the node generates its own data.
+
+```lua
+function node:on_event(e)
+    local period = tonumber(self.config.period) or 2000
+    local phase = math.floor(time.now() / period) % 2
+    self.outputs.out = phase == 0 and "1" or "0"
+    self:display(phase == 0 and "ON" or "OFF")
+end
+```
+
+### Transform Node (input -> output)
+
+Transform nodes receive `e.type == "arrival"` when upstream data arrives.
+Use `e.value` for direct access to the arriving value, or fall back to
+`self.inputs` for the full picture.
+
+```lua
+function node:on_event(e)
+    local data = e.value or self.inputs["in"]
+    self.outputs.out = string.lower(tostring(data or ""))
+end
+```
+
+### Logic Gate with Helpers (fan-in)
+
+When a node has multiple inputs, use `self.inputs` to read all of them.
+The gate fires correctly regardless of which input triggered the arrival.
+
+```lua
+local function truthy(v)
+    return v == "1" or v == "true" or v == "on"
+end
+
+function node:on_event(e)
+    local a = truthy(self.inputs.a)
+    local b = truthy(self.inputs.b)
+    self.outputs.out = (a and b) and "1" or "0"
+end
+```
+
+### Interactive Toggle (click + event)
+
+The click handler toggles state. The engine then calls `on_event` with
+`e.type == "eval"` so the node can update its output and display.
+
+```lua
+function node:on_click()
+    if self.config.state == "on" then
+        self:set_config("state", "off")
+    else
+        self:set_config("state", "on")
+    end
+end
+
+function node:on_event(e)
+    local on = self.config.state == "on"
+    self.outputs.out = on and "1" or "0"
+    self:display(on and "ON" or "OFF")
+end
+```
+
+### Interactive Gate (click + event with input passthrough)
+
+```lua
+function node:on_click()
+    if self.config.state == "on" then
+        self:set_config("state", "off")
+    else
+        self:set_config("state", "on")
+    end
+end
+
+function node:on_event(e)
+    if self.config.state == "on" then
+        self.outputs.out = self.inputs["in"]
+        self:display("OPEN")
+    else
+        self:display("CLOSED")
+    end
+end
+```
+
+### Display-Only Sink
+
+```lua
+function node:on_event(e)
+    local data = e.value or self.inputs["in"]
+    self:display(tostring(data or ""))
+end
+```
+
+### Multi-Output Node
+
+```lua
+function node:on_event(e)
+    local bits = tonumber(self.config.bits) or 8
+    for i = 0, bits - 1 do
+        self.outputs["b" .. i] = (i == pos) and "1" or "0"
+    end
+    self:display(table.concat(display))
+end
+```
+
+### Connection-Aware Node
+
+```lua
+function node:on_event(e)
+    if #self.outgoing == 0 then
+        self:log("no downstream connections")
+        return
+    end
+    self.outputs.out = self.inputs["in"]
+end
+```
+
+### Event-Type-Aware Node
+
+Use `e.type` to vary behavior depending on what triggered the call.
+
+```lua
+function node:on_event(e)
+    if e.type == "tick" then
+        self.outputs.out = tostring(time.now())
+    elseif e.type == "arrival" then
+        self:log("received " .. tostring(e.value) .. " on " .. e.slot)
+        self.outputs.out = e.value
+    elseif e.type == "eval" then
+        self:log("re-evaluated")
+    end
+end
+```
+
+## Available Globals
+
+| Global  | Description                                         |
+|---------|-----------------------------------------------------|
+| `node`  | Metatable-backed node object (see above)            |
+| `math`  | Standard Lua math library                           |
+| `string`| Standard Lua string library                         |
+| `table` | Standard Lua table library                          |
+| `time`  | GoLua time library (`time.now()`, `time.tick()`)    |
+| `print` | Prints to server stdout                             |
+| `type`  | Standard Lua `type()` function                      |
+| `tostring` / `tonumber` | Standard conversions               |
+| `pcall` / `error` | Error handling                            |
+| `pairs` / `ipairs` / `next` | Table iteration                 |
+
+## Go Integration
+
+Register a node type with an inline script:
+
+```go
+reg.Register(graph.NodeType{
+    Name:     "source",
+    Label:    "Source",
+    Category: "source",
+    Slots: []graph.Slot{
+        {ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+    },
+    Script: `function node:on_event(e) self.outputs.out = "hello" end`,
+})
+```
+
+Or load from a file:
+
+```go
+Script: mustReadFile("scripts/oscillator.lua"),
+```
+
+For interactive nodes, set `Interactive: true`:
+
+```go
+reg.Register(graph.NodeType{
+    Name:        "toggle",
+    Label:       "Toggle",
+    Interactive: true,
+    ContentHeight: 40,
+    Slots: []graph.Slot{
+        {ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
+    },
+    Script: mustReadFile("scripts/toggle.lua"),
+})
+```
+
+## How It Works (Go Side)
+
+1. `Bindings.ExecuteNode()` receives `ExecInput` with event type
+2. Creates a sandboxed VM, injects `node` global with base handlers
+3. Runs the user script — defines/overrides `on_event`, `on_click`, etc.
+4. Builds the event table `e` with type, slot, value, source, connection
+5. Calls `on_event(e)` or `on_click()` via `ProtectedCall` with the node table as `self`
+6. Collects outputs, display, glow, and config updates from the Go-side context
+7. Returns `ExecOutput` to the engine

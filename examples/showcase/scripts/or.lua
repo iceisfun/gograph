@@ -1,7 +1,19 @@
+-- Type definition
+node:set_label("OR")
+node:set_category("logic")
+node:set_content_height(30)
+node:add_input("a", "A", "string")
+node:add_input("b", "B", "string")
+node:add_output("out", "Output", "string")
+
 local function truthy(v)
     return v == "1" or v == "true" or v == "on"
 end
-local a = truthy(inputs["a"])
-local b = truthy(inputs["b"])
-local r = a or b
-return { out = r and "1" or "0", _display = r and "1" or "0" }
+
+function node:on_event(e)
+    local a = truthy(self.inputs.a)
+    local b = truthy(self.inputs.b)
+    local r = a or b
+    self:emit("out", r and "1" or "0")
+    self:display(r and "1" or "0")
+end

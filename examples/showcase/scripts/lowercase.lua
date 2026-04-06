@@ -1,3 +1,11 @@
-local data = inputs["in"]
-if type(data) ~= "string" then data = tostring(data or "") end
-return { out = string.lower(data) }
+-- Type definition
+node:set_label("Lowercase")
+node:set_category("transform")
+node:add_input("in", "Input", "string")
+node:add_output("out", "Output", "string")
+
+function node:on_event(e)
+    local data = e.value or self.inputs["in"]
+    if type(data) ~= "string" then data = tostring(data or "") end
+    self:emit("out", string.lower(data))
+end

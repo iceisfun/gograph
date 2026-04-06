@@ -2,116 +2,66 @@ package engine
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/iceisfun/gograph/graph"
 	"github.com/iceisfun/gograph/store"
 )
 
-// Executor runs a node's logic with the given inputs and returns outputs.
-type Executor interface {
-	ExecuteNode(ctx context.Context, nt graph.NodeType, inputs map[string]any, config map[string]string) (map[string]any, error)
-}
-
-// Engine executes a graph by traversing nodes in topological order and
-// running each node's logic via an [Executor]. Events are emitted to
-// subscribers for real-time visualization.
-//
-// The engine supports two execution modes:
-//   - Timed traversals: connections with duration > 0 animate dots (EventStart/EventEnd).
-//   - Instant propagation: connections with duration = 0 propagate forward immediately
-//     when any upstream value changes. No polling — pure event-driven cascade.
-//
-// Use [Start] to begin periodic execution and [PropagateFrom] to trigger
-// immediate forward propagation from a specific node.
+// Engine is a supervisor that manages node goroutines and connection
+// wires. It does not execute nodes itself — each node runs in its own
+// goroutine with a persistent Lua VM. The engine starts/stops nodes,
+// creates/destroys wires, and routes control messages.
 type Engine struct {
-	mu          sync.RWMutex
-	graph       *graph.Graph
-	graphID     string
-	store       store.GraphStore
-	registry    *graph.Registry
-	executor    Executor
-	subscribers []*Subscriber
-	duration    int // default event duration in ms
-	nodeLogger  NodeLogger
-	eventLogger EventLogger
+	mu       sync.RWMutex
+	graphID  string
+	store    store.GraphStore
+	registry *graph.Registry
+	broker   EventBroker
 
-	// Persistent node outputs — stores the last computed outputs for every
-	// node. Downstream nodes read inputs from here so fan-in nodes (AND, etc.)
-	// always have the latest value for all inputs.
-	nodeOutputs sync.Map // nodeID → map[string]any
+	nodes map[string]*nodeRunner // nodeID → runner
+	wires map[string]*Wire      // connID → wire
 
-	// Change detection for wire state and display content.
-	lastWireState sync.Map // connectionID or "nodeID:_display" → last value string
-
-	// Source evaluation interval (replaces wireInterval).
-	// Only re-evaluates source nodes and propagates forward.
-	sourceInterval time.Duration
-
-	// lifecycle
+	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	wireBuffer int
 }
 
 // EngineOption configures an [Engine].
 type EngineOption func(*Engine)
 
-// WithRegistry sets the node type registry for the engine.
-func WithRegistry(r *graph.Registry) EngineOption {
-	return func(e *Engine) { e.registry = r }
-}
-
-// WithExecutor sets the node executor (typically the Lua bindings).
-func WithExecutor(exec Executor) EngineOption {
-	return func(e *Engine) { e.executor = exec }
-}
-
-// WithStore sets the graph store for live graph reloading.
+// WithStore sets the graph persistence backend and graph ID.
 func WithStore(s store.GraphStore, graphID string) EngineOption {
 	return func(e *Engine) { e.store = s; e.graphID = graphID }
 }
 
-// WithNodeLogger sets the logger for node lifecycle events.
-func WithNodeLogger(l NodeLogger) EngineOption {
-	return func(e *Engine) { e.nodeLogger = l }
+// WithRegistry sets the node type registry.
+func WithRegistry(r *graph.Registry) EngineOption {
+	return func(e *Engine) { e.registry = r }
 }
 
-// WithEventLogger sets the logger for event lifecycle events.
-func WithEventLogger(l EventLogger) EngineOption {
-	return func(e *Engine) { e.eventLogger = l }
+// WithBroker sets the SSE event broker.
+func WithBroker(b EventBroker) EngineOption {
+	return func(e *Engine) { e.broker = b }
 }
 
-// WithSourceInterval sets the evaluation interval for source nodes.
-// Source nodes (no connected inputs) are re-evaluated on this tick and
-// their outputs propagate forward through instant connections.
-func WithSourceInterval(d time.Duration) EngineOption {
-	return func(e *Engine) { e.sourceInterval = d }
+// WithWireBuffer sets the buffered channel size for wires.
+// Defaults to [DefaultWireBuffer].
+func WithWireBuffer(n int) EngineOption {
+	return func(e *Engine) { e.wireBuffer = n }
 }
 
-// WithWireInterval is a deprecated alias for [WithSourceInterval].
-func WithWireInterval(d time.Duration) EngineOption {
-	return WithSourceInterval(d)
-}
-
-// WithEventDuration sets the default animation duration in milliseconds
-// for timed connection traversals. Defaults to 1000ms.
-func WithEventDuration(ms int) EngineOption {
-	return func(e *Engine) { e.duration = ms }
-}
-
-// New creates a new engine for the given graph.
-func New(g *graph.Graph, opts ...EngineOption) *Engine {
+// New creates a new engine supervisor.
+func New(opts ...EngineOption) *Engine {
 	e := &Engine{
-		graph:       g,
-		registry:    graph.NewRegistry(),
-		duration:    1000,
-		nodeLogger:  NopNodeLogger{},
-		eventLogger: NopEventLogger{},
+		nodes:      make(map[string]*nodeRunner),
+		wires:      make(map[string]*Wire),
+		wireBuffer: DefaultWireBuffer,
+		registry:   graph.NewRegistry(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -119,110 +69,391 @@ func New(g *graph.Graph, opts ...EngineOption) *Engine {
 	return e
 }
 
-// Subscribe creates a new event subscriber with the given buffer size.
-func (e *Engine) Subscribe(bufferSize int) *Subscriber {
-	sub := newSubscriber(bufferSize)
-	e.mu.Lock()
-	e.subscribers = append(e.subscribers, sub)
-	e.mu.Unlock()
-	return sub
-}
-
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-// Start begins periodic execution in the background.
-func (e *Engine) Start(ctx context.Context, interval time.Duration) {
-	ctx, e.cancel = context.WithCancel(ctx)
+// Start loads the graph, creates wires and node runners, and starts
+// everything. Each node runs in its own goroutine.
+func (e *Engine) Start(ctx context.Context) error {
+	e.ctx, e.cancel = context.WithCancel(ctx)
 
-	// Main execution loop — full graph with timed traversals.
-	e.wg.Go(func() {
-		e.fireExecution(ctx)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				e.fireExecution(ctx)
-			}
-		}
-	})
-
-	// Source evaluation loop — re-evaluates source nodes and propagates
-	// forward through instant connections.
-	if e.sourceInterval > 0 {
-		e.wg.Go(func() {
-			ticker := time.NewTicker(e.sourceInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					e.evaluateSources(ctx)
-				}
-			}
-		})
+	g, err := e.store.Load(ctx, e.graphID)
+	if err != nil {
+		return fmt.Errorf("load graph: %w", err)
 	}
+
+	// Create all node runners first (but don't start them yet).
+	g.RLock()
+	for _, node := range g.Nodes {
+		if err := e.createNodeRunner(node); err != nil {
+			g.RUnlock()
+			return fmt.Errorf("node %q: %w", node.ID, err)
+		}
+	}
+
+	// Create wires for all connections and register with source nodes.
+	// Safe to mutate outputWires directly here — goroutines haven't started.
+	for _, conn := range g.Connections {
+		w := e.createWire(conn)
+		if nr, ok := e.nodes[conn.FromNode]; ok {
+			nr.outputWires[conn.FromSlot] = append(nr.outputWires[conn.FromSlot], w)
+		}
+	}
+	g.RUnlock()
+
+	// Start all node runners.
+	for _, nr := range e.nodes {
+		nr := nr // capture
+		e.wg.Go(func() { nr.run() })
+	}
+
+	return nil
 }
 
-// Stop cancels periodic execution and waits for all in-flight
-// executions to complete.
+// Stop cancels all goroutines and waits for them to finish.
+// Each node's on_shutdown handler fires via ctx.Done in the select loop.
 func (e *Engine) Stop() {
 	if e.cancel != nil {
 		e.cancel()
 	}
 	e.wg.Wait()
-}
 
-func (e *Engine) fireExecution(ctx context.Context) {
-	e.wg.Go(func() {
-		if err := e.Execute(ctx); err != nil && ctx.Err() == nil {
-			e.nodeLogger.NodeSkipped("*", "execution error: "+err.Error())
-		}
-	})
+	// Close all wire intake channels.
+	e.mu.Lock()
+	for _, w := range e.wires {
+		w.Close()
+	}
+	e.wires = make(map[string]*Wire)
+	e.nodes = make(map[string]*nodeRunner)
+	e.mu.Unlock()
 }
 
 // ---------------------------------------------------------------------------
-// Forward propagation — the core of the instant wire model
+// Node management
 // ---------------------------------------------------------------------------
 
-// PropagateFrom immediately re-evaluates a node and propagates its outputs
-// forward through all instant connections. This is the primary mechanism
-// for binary/wire signals — no polling, pure event-driven cascade.
-//
-// Called by: server click handler, source tick, timed event arrival.
-func (e *Engine) PropagateFrom(ctx context.Context, nodeID string) {
-	g := e.loadGraph(ctx)
-	if g == nil {
-		return
+// AddNode creates and starts a node runner. Does NOT create wires —
+// use AddConnection for that (after both endpoints exist).
+func (e *Engine) AddNode(ctx context.Context, nodeID string) error {
+	g, err := e.store.Load(ctx, e.graphID)
+	if err != nil {
+		return err
 	}
-	visited := make(map[string]bool)
-	e.propagateFrom(ctx, g, nodeID, visited)
-}
-
-func (e *Engine) propagateFrom(ctx context.Context, g *graph.Graph, nodeID string, visited map[string]bool) {
-	if ctx.Err() != nil || visited[nodeID] {
-		return
-	}
-	visited[nodeID] = true
 
 	node := g.Node(nodeID)
 	if node == nil {
-		return
+		return fmt.Errorf("node %q not found", nodeID)
 	}
-	nt, ok := e.registry.Lookup(node.Type)
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if _, exists := e.nodes[nodeID]; exists {
+		return nil // already running
+	}
+
+	if err := e.createNodeRunner(node); err != nil {
+		return err
+	}
+
+	nr := e.nodes[nodeID]
+	e.wg.Go(func() { nr.run() })
+
+	return nil
+}
+
+// RemoveNode shuts down a node, closes its wires, and notifies peers.
+func (e *Engine) RemoveNode(ctx context.Context, nodeID string) error {
+	e.mu.Lock()
+
+	nr, ok := e.nodes[nodeID]
 	if !ok {
+		e.mu.Unlock()
+		return fmt.Errorf("node %q not running", nodeID)
+	}
+
+	// Collect wires connected to this node.
+	var affectedWires []*Wire
+	for _, w := range e.wires {
+		if w.FromNode == nodeID || w.ToNode == nodeID {
+			affectedWires = append(affectedWires, w)
+		}
+	}
+
+	// Close all wires first — unblocks wire goroutines and any stuck emit().
+	for _, w := range affectedWires {
+		w.Close()
+		delete(e.wires, w.ConnID)
+	}
+
+	delete(e.nodes, nodeID)
+	e.mu.Unlock()
+
+	// Cancel the node's context — unblocks emit(), select loop, everything.
+	// The run() goroutine will exit via <-ctx.Done() and fire on_shutdown.
+	nr.cancel()
+
+	// Notify peers about disconnect (non-blocking).
+	for _, w := range affectedWires {
+		peerID := w.ToNode
+		if peerID == nodeID {
+			peerID = w.FromNode
+		}
+		conn := *w.Conn
+		e.sendControl(peerID, ControlMsg{
+			Kind: CtrlDisconnect,
+			Conn: &conn,
+		})
+		// Remove wire from peer's output list.
+		if w.FromNode != nodeID {
+			e.sendControl(w.FromNode, ControlMsg{Kind: CtrlRemoveWire, Wire: w})
+		}
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Connection management
+// ---------------------------------------------------------------------------
+
+// AddConnection creates a wire for a connection and notifies both nodes.
+func (e *Engine) AddConnection(ctx context.Context, conn *graph.Connection) error {
+	e.mu.Lock()
+	e.createWire(conn)
+	e.mu.Unlock()
+
+	// Notify both endpoints.
+	e.sendControl(conn.FromNode, ControlMsg{
+		Kind: CtrlAddWire, Wire: e.wires[conn.ID],
+	})
+	e.sendControl(conn.FromNode, ControlMsg{
+		Kind: CtrlConnect, Conn: conn,
+	})
+	e.sendControl(conn.ToNode, ControlMsg{
+		Kind: CtrlConnect, Conn: conn,
+	})
+
+	return nil
+}
+
+// RemoveConnection closes a wire and notifies both nodes.
+func (e *Engine) RemoveConnection(ctx context.Context, connID string) error {
+	e.mu.Lock()
+	w, ok := e.wires[connID]
+	if !ok {
+		e.mu.Unlock()
+		return fmt.Errorf("wire %q not found", connID)
+	}
+	w.Close()
+	delete(e.wires, connID)
+
+	// Remove from source node's output list.
+	e.sendControl(w.FromNode, ControlMsg{Kind: CtrlRemoveWire, Wire: w})
+	e.mu.Unlock()
+
+	// Notify both endpoints.
+	conn := *w.Conn
+	e.sendControl(w.FromNode, ControlMsg{
+		Kind: CtrlDisconnect, Conn: &conn,
+	})
+	e.sendControl(w.ToNode, ControlMsg{
+		Kind: CtrlDisconnect, Conn: &conn,
+	})
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Node interaction
+// ---------------------------------------------------------------------------
+
+// ClickNode sends a click to the node and waits for it to process.
+// Returns the node (with any config updates applied).
+func (e *Engine) ClickNode(ctx context.Context, nodeID string) (*graph.Node, error) {
+	done := make(chan struct{})
+	e.sendControl(nodeID, ControlMsg{Kind: CtrlClick, Done: done})
+	<-done
+
+	// Reload node from graph with updated config.
+	nr := e.getRunner(nodeID)
+	if nr == nil {
+		return nil, fmt.Errorf("node %q not running", nodeID)
+	}
+
+	// Save config updates to the graph.
+	g, err := e.store.Load(ctx, e.graphID)
+	if err != nil {
+		return nil, err
+	}
+	node := g.Node(nodeID)
+	if node == nil {
+		return nil, fmt.Errorf("node %q not found", nodeID)
+	}
+	if node.Config == nil {
+		node.Config = make(map[string]string)
+	}
+	for k, v := range nr.config {
+		node.Config[k] = v
+	}
+	e.store.Save(ctx, e.graphID, g)
+
+	return node, nil
+}
+
+// ConnectNode notifies a node that a connection was made.
+func (e *Engine) ConnectNode(ctx context.Context, nodeID string, conn *graph.Connection) {
+	e.sendControl(nodeID, ControlMsg{Kind: CtrlConnect, Conn: conn})
+}
+
+// DisconnectNode notifies a node that a connection was removed.
+func (e *Engine) DisconnectNode(ctx context.Context, nodeID string, conn *graph.Connection) {
+	e.sendControl(nodeID, ControlMsg{Kind: CtrlDisconnect, Conn: conn})
+}
+
+// UpdateNodeConfig pushes config changes to a running node's VM.
+func (e *Engine) UpdateNodeConfig(ctx context.Context, nodeID string, config map[string]string) {
+	e.sendControl(nodeID, ControlMsg{Kind: CtrlUpdateConfig, Config: config})
+}
+
+// Sync reconciles the running engine state with the stored graph.
+// Nodes/connections that were removed from the graph are shut down.
+// Nodes/connections that were added are started. Called after the graph
+// is replaced via PUT.
+func (e *Engine) Sync(ctx context.Context) {
+	g, err := e.store.Load(ctx, e.graphID)
+	if err != nil {
 		return
 	}
 
-	// Gather inputs from persistent state.
-	inputs := e.gatherPersistentInputs(g, nodeID)
-	if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
-		return
+	e.mu.Lock()
+
+	// --- Phase 1: Identify what's stale or changed ---
+
+	var staleNodes []*nodeRunner
+	var staleNodeIDs []string
+	type configUpdate struct {
+		nodeID string
+		config map[string]string
+	}
+	var configUpdates []configUpdate
+
+	for nodeID, nr := range e.nodes {
+		node := g.Node(nodeID)
+		if node == nil {
+			staleNodes = append(staleNodes, nr)
+			staleNodeIDs = append(staleNodeIDs, nodeID)
+		} else if nodeConfigChanged(nr.config, node.Config) {
+			configUpdates = append(configUpdates, configUpdate{
+				nodeID: nodeID,
+				config: node.Config,
+			})
+		}
+	}
+
+	var staleWires []*Wire
+	for connID, w := range e.wires {
+		conn := g.ConnectionByID(connID)
+		if conn == nil {
+			staleWires = append(staleWires, w)
+		} else if wireConfigChanged(w, conn) {
+			// Config changed (e.g. duration updated) — recreate.
+			// Removing from e.wires makes it look "new" in Phase 4.
+			staleWires = append(staleWires, w)
+		}
+	}
+
+	if len(staleNodes) > 0 {
+		fmt.Printf("[engine] sync: removing %d nodes, %d wires\n", len(staleNodes), len(staleWires))
+	}
+
+	// --- Phase 2: Cancel everything simultaneously ---
+
+	// Cancel all stale node contexts (stops handlers, emit, tick timers).
+	for _, nr := range staleNodes {
+		nr.cancel()
+	}
+
+	// Close stale wires and remove from source nodes' output lists.
+	// We send CtrlRemoveWire BEFORE closing so the node goroutine
+	// stops writing to the wire before we shut it down.
+	e.mu.Unlock()
+	for _, w := range staleWires {
+		// Remove wire from source node's output list (via control chan).
+		e.sendControl(w.FromNode, ControlMsg{Kind: CtrlRemoveWire, Wire: w})
+	}
+	e.mu.Lock()
+
+	for _, w := range staleWires {
+		e.broker.Publish(e.graphID, graph.TypeEventCancel, graph.EventCancelPayload{
+			Envelope:  graph.NewEnvelope(0),
+			EventID:   "*:" + w.ConnID,
+			Immediate: true,
+		})
+		w.Close()
+		delete(e.wires, w.ConnID)
+	}
+
+	// --- Phase 3: Clean up remaining wires attached to stale nodes ---
+
+	for _, nodeID := range staleNodeIDs {
+		for connID, w := range e.wires {
+			if w.FromNode == nodeID || w.ToNode == nodeID {
+				w.Close()
+				delete(e.wires, connID)
+			}
+		}
+		delete(e.nodes, nodeID)
+	}
+
+	e.mu.Unlock()
+
+	// --- Phase 3b: Push config updates to running nodes ---
+	for _, cu := range configUpdates {
+		e.sendControl(cu.nodeID, ControlMsg{Kind: CtrlUpdateConfig, Config: cu.config})
+	}
+
+	// --- Phase 4: Add new nodes/connections ---
+
+	g.RLock()
+	var addNodes []string
+	for nodeID := range g.Nodes {
+		if e.getRunner(nodeID) == nil {
+			addNodes = append(addNodes, nodeID)
+		}
+	}
+
+	var addConns []*graph.Connection
+	for _, conn := range g.Connections {
+		e.mu.RLock()
+		_, exists := e.wires[conn.ID]
+		e.mu.RUnlock()
+		if !exists {
+			addConns = append(addConns, conn)
+		}
+	}
+	g.RUnlock()
+
+	for _, nodeID := range addNodes {
+		e.AddNode(ctx, nodeID)
+	}
+	for _, conn := range addConns {
+		e.AddConnection(ctx, conn)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+func (e *Engine) createNodeRunner(node *graph.Node) error {
+	nt, ok := e.registry.Lookup(node.Type)
+	if !ok {
+		return fmt.Errorf("unknown type %q", node.Type)
+	}
+	if nt.Script == "" {
+		return nil // no script — nothing to run
 	}
 
 	config := node.Config
@@ -230,465 +461,86 @@ func (e *Engine) propagateFrom(ctx context.Context, g *graph.Graph, nodeID strin
 		config = make(map[string]string)
 	}
 
-	// Execute the node.
-	var outputs map[string]any
-	var err error
-	if e.executor != nil && nt.Script != "" {
-		outputs, err = e.executor.ExecuteNode(ctx, nt, inputs, config)
-		if err != nil {
-			return
-		}
-	} else {
-		outputs = inputs
-	}
-
-	// Handle _display with change detection.
-	e.emitDisplayIfChanged(nodeID, outputs)
-	delete(outputs, "_display")
-
-	// Store persistently.
-	e.nodeOutputs.Store(nodeID, outputs)
-
-	// Follow instant outgoing connections.
-	g.RLock()
-	var downstream []string
-	for _, c := range g.Connections {
-		if c.FromNode != nodeID {
-			continue
-		}
-		if isTimedConnection(c) {
-			continue
-		}
-		e.emitConnectionStateIfChanged(c, outputs)
-		downstream = append(downstream, c.ToNode)
-	}
-	g.RUnlock()
-
-	// Recurse into instant downstream nodes.
-	for _, nextID := range downstream {
-		e.propagateFrom(ctx, g, nextID, visited)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Source evaluation — replaces evaluateWires
-// ---------------------------------------------------------------------------
-
-// evaluateSources re-evaluates only source nodes (no connected inputs)
-// and propagates their outputs forward through instant connections.
-func (e *Engine) evaluateSources(ctx context.Context) {
-	g := e.loadGraph(ctx)
-	if g == nil {
-		return
-	}
-
-	order, err := Order(g)
-	if err != nil {
-		return
-	}
-
-	visited := make(map[string]bool)
-
-	for _, nodeID := range order {
-		if ctx.Err() != nil {
-			return
-		}
-
-		nt, ok := e.registry.Lookup(func() string {
-			n := g.Node(nodeID)
-			if n == nil {
-				return ""
-			}
-			return n.Type
-		}())
-		if !ok {
-			continue
-		}
-
-		// Only evaluate source nodes: those with no input slots or no
-		// connected inputs.
-		if len(nt.InputSlots()) > 0 && e.hasConnectedInputs(g, nodeID) {
-			continue
-		}
-
-		// Execute and propagate forward.
-		e.propagateFrom(ctx, g, nodeID, visited)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Full timed execution
-// ---------------------------------------------------------------------------
-
-// Execute runs the full graph in topological order, handling timed
-// connection traversals with sleep. After each node executes, instant
-// downstream connections propagate forward immediately.
-func (e *Engine) Execute(ctx context.Context) error {
-	g := e.loadGraph(ctx)
-	if g == nil {
-		return fmt.Errorf("failed to load graph")
-	}
-
-	order, err := Order(g)
+	nr, err := newNodeRunner(e.ctx, node.ID, e.graphID, nt, config, e.broker)
 	if err != nil {
 		return err
 	}
-
-	// Local outputs for timed traversal flow within this execution.
-	outputs := make(map[string]map[string]any)
-	emitTimes := make(map[string]time.Time)
-
-	for _, nodeID := range order {
-		if err := ctx.Err(); err != nil {
-			e.cancelAll()
-			return err
-		}
-
-		node := g.Node(nodeID)
-		if node == nil {
-			continue
-		}
-
-		nt, ok := e.registry.Lookup(node.Type)
-		if !ok {
-			return fmt.Errorf("node %q: unknown type %q", nodeID, node.Type)
-		}
-
-		// Gather inputs from the local execution-scoped map.
-		inputs := e.gatherInputs(g, nodeID, outputs)
-		if len(inputs) == 0 && len(nt.InputSlots()) > 0 {
-			e.nodeLogger.NodeSkipped(nodeID, "has input slots but no incoming connections")
-			continue
-		}
-
-		// Wait for incoming timed traversals.
-		if waitErr := e.waitForArrivals(ctx, g, nodeID, emitTimes); waitErr != nil {
-			return waitErr
-		}
-
-		config := node.Config
-		if config == nil {
-			config = make(map[string]string)
-		}
-
-		e.nodeLogger.NodeExecuting(nodeID, node.Type, len(inputs))
-
-		var nodeOutputs map[string]any
-		if e.executor != nil && nt.Script != "" {
-			nodeOutputs, err = e.executor.ExecuteNode(ctx, nt, inputs, config)
-			if err != nil {
-				return fmt.Errorf("node %q: execution failed: %w", nodeID, err)
-			}
-		} else {
-			nodeOutputs = inputs
-		}
-
-		// Handle _display.
-		if display, ok := nodeOutputs["_display"]; ok {
-			if text, ok := display.(string); ok {
-				e.emit(Event{
-					Type: graph.TypeNodeContent,
-					Payload: graph.NodeContentPayload{
-						Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
-						NodeID:   nodeID,
-						Text:     text,
-					},
-				})
-			}
-			delete(nodeOutputs, "_display")
-		}
-
-		outputs[nodeID] = nodeOutputs
-		e.nodeOutputs.Store(nodeID, nodeOutputs) // persist for propagation
-		e.nodeLogger.NodeExecuted(nodeID, node.Type, len(nodeOutputs))
-
-		// Node hold (delay nodes).
-		if d, ok := config["duration"]; ok {
-			if ms, parseErr := strconv.Atoi(d); parseErr == nil && ms > 0 {
-				e.nodeLogger.NodeHolding(nodeID, ms)
-				e.emit(Event{
-					Type: graph.TypeNodeActive,
-					Payload: graph.NodeActivePayload{
-						Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
-						NodeID:   nodeID,
-						Duration: ms,
-					},
-				})
-				select {
-				case <-ctx.Done():
-					e.cancelAll()
-					return ctx.Err()
-				case <-time.After(time.Duration(ms) * time.Millisecond):
-				}
-			}
-		}
-
-		e.logDisconnectedOutputs(g, nodeID, nt)
-
-		// Emit timed events and propagate instant connections forward.
-		e.emitTimedAndPropagateInstant(ctx, g, nodeID, nodeOutputs)
-		emitTimes[nodeID] = time.Now()
-	}
-
+	e.nodes[node.ID] = nr
 	return nil
 }
 
-// emitTimedAndPropagateInstant handles outgoing connections after a node
-// executes in the full Execute cycle. Timed connections get EventStart/EventEnd.
-// Instant connections propagate forward immediately via propagateFrom.
-func (e *Engine) emitTimedAndPropagateInstant(ctx context.Context, g *graph.Graph, nodeID string, outputs map[string]any) {
-	g.RLock()
-	var timedConns []*graph.Connection
-	var instantDownstream []string
-	for _, c := range g.Connections {
-		if c.FromNode != nodeID {
-			continue
-		}
-		if isTimedConnection(c) {
-			timedConns = append(timedConns, c)
-		} else {
-			e.emitConnectionStateIfChanged(c, outputs)
-			instantDownstream = append(instantDownstream, c.ToNode)
-		}
-	}
-	g.RUnlock()
+// createWire creates a wire and starts its goroutine. Does NOT register
+// with the source node's outputWires — that must be done separately
+// (directly for initial setup, via CtrlAddWire for runtime changes).
+func (e *Engine) createWire(conn *graph.Connection) *Wire {
+	w := NewWire(conn, e.wireBuffer)
 
-	// Emit timed events.
-	now := time.Now().UnixMilli()
-	for _, c := range timedConns {
-		eventID := generateEventID()
-		e.eventLogger.EventEmitted(eventID, c.ID, nodeID, c.ToNode, connDuration(c))
-		e.emit(Event{
-			Type: graph.TypeEventStart,
-			Payload: graph.EventStartPayload{
-				Envelope:     graph.NewEnvelope(now),
-				EventID:      eventID,
-				ConnectionID: c.ID,
-				Duration:     connDuration(c),
-			},
+	// Derive wire context from engine context.
+	wCtx, wCancel := context.WithCancel(e.ctx)
+	w.ctx = wCtx
+	w.cancel = wCancel
+
+	e.wires[conn.ID] = w
+
+	// Start the wire goroutine — delivers to target node's input.
+	target := e.getInputChan(conn.ToNode)
+	if target != nil {
+		e.wg.Go(func() {
+			w.Run(e.graphID, target, e.broker)
 		})
-		go func(eid, connID, toNode string, dur int) {
-			time.Sleep(time.Duration(dur) * time.Millisecond)
-			e.eventLogger.EventArrived(eid, connID, toNode)
-			e.emit(Event{
-				Type: graph.TypeEventEnd,
-				Payload: graph.EventEndPayload{
-					Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
-					EventID:  eid,
-				},
-			})
-		}(eventID, c.ID, c.ToNode, connDuration(c))
 	}
 
-	// Propagate instant downstream.
-	visited := make(map[string]bool)
-	visited[nodeID] = true
-	for _, nextID := range instantDownstream {
-		e.propagateFrom(ctx, g, nextID, visited)
-	}
+	return w
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-func (e *Engine) emit(evt Event) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	for _, sub := range e.subscribers {
-		sub.send(evt)
+func nodeConfigChanged(running map[string]string, stored map[string]string) bool {
+	if len(running) != len(stored) {
+		return true
 	}
-}
-
-func (e *Engine) loadGraph(ctx context.Context) *graph.Graph {
-	if e.store != nil {
-		g, err := e.store.Load(ctx, e.graphID)
-		if err != nil {
-			return nil
-		}
-		return g
-	}
-	return e.graph
-}
-
-// gatherInputs reads from a local execution-scoped outputs map (for Execute).
-func (e *Engine) gatherInputs(g *graph.Graph, nodeID string, outputs map[string]map[string]any) map[string]any {
-	g.RLock()
-	defer g.RUnlock()
-	inputs := make(map[string]any)
-	for _, c := range g.Connections {
-		if c.ToNode == nodeID {
-			if nodeOut, ok := outputs[c.FromNode]; ok {
-				if val, ok := nodeOut[c.FromSlot]; ok {
-					inputs[c.ToSlot] = val
-				}
-			}
-		}
-	}
-	return inputs
-}
-
-// gatherPersistentInputs reads from the persistent nodeOutputs map (for propagation).
-func (e *Engine) gatherPersistentInputs(g *graph.Graph, nodeID string) map[string]any {
-	g.RLock()
-	defer g.RUnlock()
-	inputs := make(map[string]any)
-	for _, c := range g.Connections {
-		if c.ToNode == nodeID {
-			if stored, ok := e.nodeOutputs.Load(c.FromNode); ok {
-				nodeOut := stored.(map[string]any)
-				if val, ok := nodeOut[c.FromSlot]; ok {
-					inputs[c.ToSlot] = val
-				}
-			}
-		}
-	}
-	return inputs
-}
-
-func (e *Engine) hasConnectedInputs(g *graph.Graph, nodeID string) bool {
-	g.RLock()
-	defer g.RUnlock()
-	for _, c := range g.Connections {
-		if c.ToNode == nodeID {
+	for k, v := range stored {
+		if running[k] != v {
 			return true
 		}
 	}
 	return false
 }
 
-func (e *Engine) emitDisplayIfChanged(nodeID string, outputs map[string]any) {
-	display, ok := outputs["_display"]
-	if !ok {
-		return
-	}
-	text, ok := display.(string)
-	if !ok {
-		return
-	}
-	key := nodeID + ":_display"
-	if prev, loaded := e.lastWireState.Load(key); loaded && prev.(string) == text {
-		return
-	}
-	e.lastWireState.Store(key, text)
-	e.emit(Event{
-		Type: graph.TypeNodeContent,
-		Payload: graph.NodeContentPayload{
-			Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
-			NodeID:   nodeID,
-			Text:     text,
-		},
-	})
-}
-
-func (e *Engine) emitConnectionStateIfChanged(c *graph.Connection, outputs map[string]any) {
-	val := ""
-	if v, ok := outputs[c.FromSlot]; ok {
-		val = fmt.Sprintf("%v", v)
-	}
-	if prev, loaded := e.lastWireState.Load(c.ID); loaded && prev.(string) == val {
-		return
-	}
-	e.lastWireState.Store(c.ID, val)
-	active := val != "" && val != "0" && val != "false" && val != "off" && val != "<nil>"
-	e.emit(Event{
-		Type: graph.TypeConnectionState,
-		Payload: graph.ConnectionStatePayload{
-			Envelope:     graph.NewEnvelope(time.Now().UnixMilli()),
-			ConnectionID: c.ID,
-			Active:       active,
-			Value:        val,
-		},
-	})
-}
-
-func (e *Engine) logDisconnectedOutputs(g *graph.Graph, nodeID string, nt graph.NodeType) {
-	g.RLock()
-	defer g.RUnlock()
-	for _, slot := range nt.OutputSlots() {
-		connected := false
-		for _, c := range g.Connections {
-			if c.FromNode == nodeID && c.FromSlot == slot.ID {
-				connected = true
-				break
-			}
-		}
-		if !connected {
-			e.nodeLogger.NodeDisconnected(nodeID, slot.ID)
-		}
-	}
-}
-
-func (e *Engine) waitForArrivals(ctx context.Context, g *graph.Graph, nodeID string, emitTimes map[string]time.Time) error {
-	g.RLock()
-	var latestArrival time.Time
-	for _, c := range g.Connections {
-		if c.ToNode != nodeID {
-			continue
-		}
-		emitTime, ok := emitTimes[c.FromNode]
-		if !ok {
-			continue
-		}
-		arrival := emitTime.Add(time.Duration(connDuration(c)) * time.Millisecond)
-		if arrival.After(latestArrival) {
-			latestArrival = arrival
-		}
-	}
-	g.RUnlock()
-
-	if !latestArrival.IsZero() {
-		wait := time.Until(latestArrival)
-		if wait > 0 {
-			e.nodeLogger.NodeWaiting(nodeID, wait.Milliseconds())
-			select {
-			case <-ctx.Done():
-				e.cancelAll()
-				return ctx.Err()
-			case <-time.After(wait):
-			}
-		}
+func (e *Engine) getInputChan(nodeID string) chan<- Arrival {
+	if nr, ok := e.nodes[nodeID]; ok {
+		return nr.inputChan
 	}
 	return nil
 }
 
-func (e *Engine) cancelAll() {
-	e.eventLogger.EventCancelled("context cancelled")
-	e.emit(Event{
-		Type: graph.TypeEventCancel,
-		Payload: graph.EventCancelPayload{
-			Envelope:  graph.NewEnvelope(time.Now().UnixMilli()),
-			EventID:   "*",
-			Immediate: true,
-		},
-	})
+func (e *Engine) getRunner(nodeID string) *nodeRunner {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.nodes[nodeID]
 }
 
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
-
-func isTimedConnection(c *graph.Connection) bool {
-	return connDuration(c) > 0
-}
-
-func connDuration(c *graph.Connection) int {
-	if c.Config == nil {
-		return 0
+// wireConfigChanged returns true if the connection's config differs from
+// the running wire's config (e.g. duration was changed).
+func wireConfigChanged(w *Wire, conn *graph.Connection) bool {
+	newDur := 0
+	if conn.Config != nil {
+		if d, ok := conn.Config["duration"]; ok {
+			if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
+				newDur = ms
+			}
+		}
 	}
-	d, ok := c.Config["duration"]
+	return w.Duration != newDur
+}
+
+func (e *Engine) sendControl(nodeID string, msg ControlMsg) {
+	e.mu.RLock()
+	nr, ok := e.nodes[nodeID]
+	e.mu.RUnlock()
 	if !ok {
-		return 0
+		return
 	}
-	ms, err := strconv.Atoi(d)
-	if err != nil || ms <= 0 {
-		return 0
+	select {
+	case nr.controlChan <- msg:
+	case <-e.ctx.Done():
 	}
-	return ms
-}
-
-func generateEventID() string {
-	var buf [8]byte
-	rand.Read(buf[:])
-	return hex.EncodeToString(buf[:])
 }

@@ -2,21 +2,31 @@ package graph
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
+
+// ConfigField describes a user-editable config property on a node type.
+// The frontend reads the schema from /api/node-types to render config modals.
+type ConfigField struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Default string `json:"default"`
+}
 
 // NodeType defines a category of node with its input and output slots.
 // All [Node] instances referencing the same type name share these slot
 // definitions. The optional Script field holds Lua source for execution.
 type NodeType struct {
-	Name          string `json:"name"`
-	Label         string `json:"label"`
-	Category      string `json:"category,omitempty"`
-	ContentHeight int    `json:"contentHeight,omitempty"`
-	Interactive   bool   `json:"interactive,omitempty"`
-	Slots         []Slot `json:"slots"`
-	Script        string `json:"-"`
-	ScriptName    string `json:"scriptName,omitempty"`
+	Name          string        `json:"name"`
+	Label         string        `json:"label"`
+	Category      string        `json:"category,omitempty"`
+	ContentHeight int           `json:"contentHeight,omitempty"`
+	Interactive   bool          `json:"interactive,omitempty"`
+	Slots         []Slot        `json:"slots"`
+	ConfigSchema  []ConfigField `json:"configSchema,omitempty"`
+	Script        string        `json:"-"`
+	ScriptName    string        `json:"scriptName,omitempty"`
 }
 
 // InputSlots returns only the input slots for this type.
@@ -90,7 +100,7 @@ func (r *Registry) Lookup(name string) (NodeType, bool) {
 	return nt, ok
 }
 
-// Types returns all registered node types.
+// Types returns all registered node types, sorted by category then name.
 func (r *Registry) Types() []NodeType {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -99,5 +109,11 @@ func (r *Registry) Types() []NodeType {
 	for _, nt := range r.types {
 		out = append(out, nt)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Category != out[j].Category {
+			return out[i].Category < out[j].Category
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out
 }

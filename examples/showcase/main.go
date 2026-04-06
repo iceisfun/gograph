@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/iceisfun/gograph/engine"
 	"github.com/iceisfun/gograph/frontend"
@@ -25,211 +24,18 @@ func main() {
 	dev := flag.Bool("dev", false, "serve frontend from disk")
 	flag.Parse()
 
-	// Register node types across several categories.
+	// Register node types — Lua scripts define their own shape.
 	reg := graph.NewRegistry()
-
-	must(reg.Register(graph.NodeType{
-		Name:     "source",
-		Label:    "Source",
-		Category: "source",
-		Slots: []graph.Slot{
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: `return { out = "Hello, World!" }`,
-	}))
-	must(reg.Register(graph.NodeType{
-		Name:     "source2",
-		Label:    "Source 2",
-		Category: "source",
-		Slots: []graph.Slot{
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: `return { out = "GoGraph!" }`,
-	}))
-	must(reg.Register(graph.NodeType{
-		Name:     "lowercase",
-		Label:    "Lowercase",
-		Category: "transform",
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/lowercase.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name:     "reverse",
-		Label:    "Reverse",
-		Category: "transform",
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/reverse.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name:     "hexdump",
-		Label:    "Hex Dump",
-		Category: "output",
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/hexdump.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name:     "print",
-		Label:    "Print",
-		Category: "output",
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/print.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name:     "delay",
-		Label:    "Delay",
-		Category: "delay",
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
-		},
-		Script: mustReadFile("scripts/delay.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name:          "show",
-		Label:         "Show",
-		Category:      "output",
-		ContentHeight: 40,
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/show.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name:          "randomcase",
-		Label:         "RanDOmCaSe",
-		Category:      "transform",
-		ContentHeight: 40,
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/randomcase.lua"),
-	}))
-
-	// Logic & utility nodes
-	must(reg.Register(graph.NodeType{
-		Name: "oscillator", Label: "Oscillator", Category: "source", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/oscillator.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "switch", Label: "Switch", Category: "transform", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-			{ID: "on", Name: "On", Direction: graph.Output, DataType: "string"},
-			{ID: "off", Name: "Off", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/switch.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "words", Label: "Words", Category: "source", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/words.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "splitter", Label: "Splitter", Category: "transform", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/splitter.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "ratelimit", Label: "Rate Limit", Category: "transform", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
-		},
-		Script: mustReadFile("scripts/ratelimit.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "and", Label: "AND", Category: "logic", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "a", Name: "A", Direction: graph.Input, DataType: "string"},
-			{ID: "b", Name: "B", Direction: graph.Input, DataType: "string"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/and.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "or", Label: "OR", Category: "logic", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "a", Name: "A", Direction: graph.Input, DataType: "string"},
-			{ID: "b", Name: "B", Direction: graph.Input, DataType: "string"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/or.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "xor", Label: "XOR", Category: "logic", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "a", Name: "A", Direction: graph.Input, DataType: "string"},
-			{ID: "b", Name: "B", Direction: graph.Input, DataType: "string"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/xor.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "not", Label: "NOT", Category: "logic", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "string"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/not.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "counter", Label: "Counter", Category: "source", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/counter.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "shift_register", Label: "Shift Register", Category: "logic", ContentHeight: 30,
-		Slots: []graph.Slot{
-			{ID: "clk", Name: "Clock", Direction: graph.Input, DataType: "any"},
-			{ID: "b0", Name: "Bit 0", Direction: graph.Output, DataType: "string"},
-			{ID: "b1", Name: "Bit 1", Direction: graph.Output, DataType: "string"},
-			{ID: "b2", Name: "Bit 2", Direction: graph.Output, DataType: "string"},
-			{ID: "b3", Name: "Bit 3", Direction: graph.Output, DataType: "string"},
-			{ID: "b4", Name: "Bit 4", Direction: graph.Output, DataType: "string"},
-			{ID: "b5", Name: "Bit 5", Direction: graph.Output, DataType: "string"},
-			{ID: "b6", Name: "Bit 6", Direction: graph.Output, DataType: "string"},
-			{ID: "b7", Name: "Bit 7", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/shift_register.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "toggle", Label: "Toggle", Category: "source",
-		Interactive: true, ContentHeight: 40,
-		Slots: []graph.Slot{
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "string"},
-		},
-		Script: mustReadFile("scripts/toggle.lua"),
-	}))
-	must(reg.Register(graph.NodeType{
-		Name: "gate", Label: "Gate", Category: "transform",
-		Interactive: true, ContentHeight: 40,
-		Slots: []graph.Slot{
-			{ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
-			{ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
-		},
-		Script: mustReadFile("scripts/gate.lua"),
-	}))
+	scripts := []string{
+		"source", "lowercase", "reverse", "hexdump", "print",
+		"delay", "show", "randomcase", "oscillator", "switch",
+		"words", "splitter", "ratelimit",
+		"and", "or", "xor", "not",
+		"counter", "shift_register", "toggle", "gate",
+	}
+	for _, name := range scripts {
+		must(golua.Register(reg, name, mustReadFile("scripts/"+name+".lua")))
+	}
 
 	// Build the showcase graph with multiple paths.
 	//
@@ -242,7 +48,7 @@ func main() {
 	g := graph.NewGraph("showcase")
 
 	// Row 1: src1 -> lower -> delay1 -> hex1
-	must(g.AddNode(&graph.Node{ID: "src1", Type: "source", Label: "Hello, World!", Position: graph.Position{X: 80, Y: 150}}))
+	must(g.AddNode(&graph.Node{ID: "src1", Type: "source", Label: "Hello, World!", Position: graph.Position{X: 80, Y: 150}, Config: map[string]string{"message": "Hello, World!", "interval": "5000"}}))
 	must(g.AddNode(&graph.Node{ID: "lower", Type: "lowercase", Label: "Lowercase", Position: graph.Position{X: 350, Y: 80}}))
 	must(g.AddNode(&graph.Node{ID: "delay1", Type: "delay", Label: "Delay 500ms", Position: graph.Position{X: 620, Y: 80}, Config: map[string]string{"duration": "500"}}))
 	must(g.AddNode(&graph.Node{ID: "hex1", Type: "hexdump", Label: "Hex Dump", Position: graph.Position{X: 890, Y: 80}}))
@@ -252,7 +58,7 @@ func main() {
 	must(g.AddNode(&graph.Node{ID: "print1", Type: "show", Label: "Show", Position: graph.Position{X: 620, Y: 280}}))
 
 	// Row 3: src2 -> delay2 -> randomcase -> reverse2 -> hex2
-	must(g.AddNode(&graph.Node{ID: "src2", Type: "source2", Label: "GoGraph!", Position: graph.Position{X: 80, Y: 420}}))
+	must(g.AddNode(&graph.Node{ID: "src2", Type: "source", Label: "GoGraph!", Position: graph.Position{X: 80, Y: 420}, Config: map[string]string{"message": "GoGraph!", "interval": "5000"}}))
 	must(g.AddNode(&graph.Node{ID: "delay2", Type: "delay", Label: "Delay 1500ms", Position: graph.Position{X: 350, Y: 420}, Config: map[string]string{"duration": "1500"}}))
 	must(g.AddNode(&graph.Node{ID: "rcase", Type: "randomcase", Label: "RanDOmCaSe", Position: graph.Position{X: 530, Y: 420}}))
 	must(g.AddNode(&graph.Node{ID: "reverse2", Type: "reverse", Label: "Reverse", Position: graph.Position{X: 750, Y: 420}}))
@@ -302,18 +108,6 @@ func main() {
 	st := store.NewMemoryStore()
 	must(st.Save(context.Background(), g.ID, g))
 
-	// Engine with Lua executor.
-	luaExec := golua.New(reg)
-	eng := engine.New(g,
-		engine.WithRegistry(reg),
-		engine.WithExecutor(luaExec),
-		engine.WithEventDuration(1000),
-		engine.WithStore(st, g.ID),
-		engine.WithSourceInterval(200*time.Millisecond),
-		engine.WithNodeLogger(engine.DebugNodeLogger{}),
-		engine.WithEventLogger(engine.DebugEventLogger{}),
-	)
-
 	// Server.
 	opts := []server.Option{
 		server.WithStore(st),
@@ -324,19 +118,18 @@ func main() {
 	} else {
 		opts = append(opts, server.WithStaticFS(frontend.FS()))
 	}
-	opts = append(opts, server.WithEngine(eng))
 	srv := server.New(opts...)
 
-	// Wire engine events to SSE.
-	sub := eng.Subscribe(64)
-	go func() {
-		for evt := range sub.Events() {
-			srv.Publish(g.ID, evt.Type, evt.Payload)
-		}
-	}()
+	// Engine — supervisor, not orchestrator. Server IS the event broker.
+	eng := engine.New(
+		engine.WithRegistry(reg),
+		engine.WithStore(st, g.ID),
+		engine.WithBroker(srv),
+	)
+	srv.SetEngine(eng)
 
-	// Start the engine — executes every 5 seconds in the background.
-	eng.Start(context.Background(), 5*time.Second)
+	// Start — creates goroutines for all nodes, wires for all connections.
+	must(eng.Start(context.Background()))
 	defer eng.Stop()
 
 	fmt.Printf("GoGraph Showcase: http://127.0.0.1%s\n", *addr)
