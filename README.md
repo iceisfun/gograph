@@ -5,17 +5,17 @@ Canvas-based graph engine with a Go backend and embedded TypeScript frontend.
 ## Architecture
 
 ```
-┌─────────────┐         ┌──────────────────┐
+┌─────────────┐         ┌───────────────────┐
 │  Go Server  │         │ TypeScript Client │
-│             │  SSE    │                  │
-│  graph/     ├────────►│  render/         │
-│  engine/    │         │  interaction/    │
-│  server/    │◄────────│  state/          │
-│  lua/       │  REST   │  net/            │
-│  store/     │         │  themes/         │
-│  frontend/  │         │                  │
-│  (embed)    │         │  (canvas)        │
-└─────────────┘         └──────────────────┘
+│             │  SSE    │                   │
+│  graph/     ├────────►│  render/          │
+│  engine/    │         │  interaction/     │
+│  server/    │◄────────│  state/           │
+│  lua/       │  REST   │  net/             │
+│  store/     │         │  themes/          │
+│  frontend/  │         │                   │
+│  (embed)    │         │  (canvas)         │
+└─────────────┘         └───────────────────┘
 ```
 
 - **graph/** - Core types: Graph, Node, Slot, Connection, NodeType, SSE wire protocol

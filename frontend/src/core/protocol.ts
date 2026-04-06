@@ -60,10 +60,21 @@ export interface ConnectionUpdatePayload extends Envelope {
 export const NODE_CONTENT = 'node.content';
 export const CONNECTION_STATE = 'connection.state';
 
+export interface ContentSlot {
+    text: string;
+    color?: string;
+    size?: number;
+    align?: string;    // left|center|right
+    font?: string;     // monospace|sans-serif
+    animate?: string;  // flash|pulse|none
+    duration?: number; // animation ms
+}
+
 export interface NodeContentPayload extends Envelope {
     nodeID: string;
     text?: string;
     image?: string;
+    slots?: Record<string, ContentSlot>;
 }
 
 export interface ConnectionStatePayload extends Envelope {

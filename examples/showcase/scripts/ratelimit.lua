@@ -1,7 +1,7 @@
 -- Type definition
 node:set_label("Rate Limit")
 node:set_category("transform")
-node:set_content_height(30)
+node:set_content_height(50)
 node:add_input("in", "Input", "any")
 node:add_output("out", "Output", "any")
 node:define_config("rate", "2000", "Rate (ms)")
@@ -29,12 +29,11 @@ function node:on_event(e)
     if size > 0 and elapsed >= rate then
         self:drain()
     elseif size > 0 then
-        -- On cooldown — schedule a tick for when it expires.
         self:schedule_tick(rate - elapsed)
-        -- self:display("HOLD [" .. size .. "]")
-        self:display("HOLD [" .. size .. "] @" .. self.config.rate .. "ms")
+        self:display("status", "HOLD [" .. size .. "] @" .. self.config.rate .. "ms")
     else
-        self:display("IDLE")
+        self:display("status", "IDLE")
+        self:display("value", "")
     end
 end
 
@@ -48,7 +47,7 @@ function node:on_tick()
         self:drain()
     elseif size > 0 then
         self:schedule_tick(rate - elapsed)
-        self:display("HOLD [" .. size .. "]")
+        self:display("status", "HOLD [" .. size .. "] @" .. self.config.rate .. "ms")
     end
 end
 
@@ -61,13 +60,18 @@ function node:drain()
     self:emit("out", val)
 
     local size = self.state.qt - self.state.qh
-    self:display("EMIT [" .. size .. "]")
+    self:display("status", "EMIT [" .. size .. "]")
+    self:display("value", tostring(val), {color="#00ff00", animate="flash", duration=300})
 
     -- More queued? Schedule next drain after cooldown.
     if size > 0 then
         local rate = tonumber(self.config.rate) or 2000
         self:schedule_tick(rate)
     end
+end
+
+function node:on_config()
+    -- Config changed; nothing to restart (schedule_tick is demand-driven).
 end
 
 function node:on_disconnect(e)

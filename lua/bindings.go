@@ -16,8 +16,8 @@ import (
 // NodeCallbacks are Go functions provided by the node runner. They're
 // called directly from Lua during handler execution.
 type NodeCallbacks struct {
-	Emit         func(slot string, value any) // send value on output slot
-	Display      func(text string)            // set node display content
+	Emit         func(slot string, value any)                // send value on output slot
+	Display      func(slotName string, slot graph.ContentSlot) // set display content in named slot
 	Glow         func(durationMs int)         // trigger glow animation
 	Log          func(msg string)             // log with node ID prefix
 	SetConfig    func(key, value string)      // update config (persisted)
@@ -206,13 +206,45 @@ func buildPersistentNodeBinding(
 		return 0
 	}))
 
-	// --- display ---
+	// --- display (overloaded) ---
+	// 1 arg: display(text)           → default slot
+	// 2 args: display(slot, text)    → named slot
+	// 3 args: display(slot, text, opts) → named slot with style
 	node.SetString("display", vm.NewNativeFunc(func(v *vm.VM) int {
-		text := v.Get(2)
-		if text.IsString() {
-			cb.Display(text.AsString())
-		} else if text.IsNumber() {
-			cb.Display(vm.ValueToString(text))
+		arg1 := v.Get(2) // colon call: self=1, args start at 2
+		arg2 := v.Get(3)
+		arg3 := v.Get(4)
+
+		if arg2.IsNil() {
+			// 1 arg: display(text) → default slot
+			var text string
+			if arg1.IsString() {
+				text = arg1.AsString()
+			} else if arg1.IsNumber() {
+				text = vm.ValueToString(arg1)
+			} else {
+				return 0
+			}
+			cb.Display("default", graph.ContentSlot{Text: text})
+		} else {
+			// 2+ args: display(slot, text [, opts])
+			if !arg1.IsString() {
+				return 0
+			}
+			slotName := arg1.AsString()
+			var text string
+			if arg2.IsString() {
+				text = arg2.AsString()
+			} else if arg2.IsNumber() {
+				text = vm.ValueToString(arg2)
+			} else {
+				return 0
+			}
+			if arg3.IsTable() {
+				cb.Display(slotName, parseContentSlotOpts(arg3.AsTable(), text))
+			} else {
+				cb.Display(slotName, graph.ContentSlot{Text: text})
+			}
 		}
 		return 0
 	}))
@@ -302,6 +334,30 @@ func buildPersistentNodeBinding(
 // ---------------------------------------------------------------------------
 // Connection binding (read-only table per connection)
 // ---------------------------------------------------------------------------
+
+// parseContentSlotOpts reads style options from a Lua table into a ContentSlot.
+func parseContentSlotOpts(t vm.LuaTable, text string) graph.ContentSlot {
+	s := graph.ContentSlot{Text: text}
+	if v := t.Get(vm.NewString("color")); v.IsString() {
+		s.Color = v.AsString()
+	}
+	if v := t.Get(vm.NewString("size")); v.IsNumber() {
+		s.Size = int(v.AsInt())
+	}
+	if v := t.Get(vm.NewString("align")); v.IsString() {
+		s.Align = v.AsString()
+	}
+	if v := t.Get(vm.NewString("font")); v.IsString() {
+		s.Font = v.AsString()
+	}
+	if v := t.Get(vm.NewString("animate")); v.IsString() {
+		s.Animate = v.AsString()
+	}
+	if v := t.Get(vm.NewString("duration")); v.IsNumber() {
+		s.Duration = int(v.AsInt())
+	}
+	return s
+}
 
 // BuildConnectionBinding creates a Lua table representing a connection.
 func BuildConnectionBinding(c *graph.Connection) *vm.Table {

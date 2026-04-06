@@ -1,14 +1,21 @@
 import type { Graph, Node, Connection, NodeType } from '../core/types.js';
+import type { ContentSlot } from '../core/protocol.js';
 import type { Vec2, Rect } from '../core/geometry.js';
 import { vec2 } from '../core/geometry.js';
 import { computeLayout, type NodeLayout, type SlotLayout, type Side } from './layout-cache.js';
+
+export interface NodeContentEntry {
+    text?: string;
+    image?: string;
+    slots: Map<string, ContentSlot>;
+}
 
 export class GraphState {
     current: Graph | null = null;
     private _nodeTypes: NodeType[] = [];
     private _nodeTypeMap: Map<string, NodeType> = new Map();
     private _layoutCache: Map<string, NodeLayout> = new Map();
-    nodeContent: Map<string, { text?: string; image?: string }> = new Map();
+    nodeContent: Map<string, NodeContentEntry> = new Map();
 
     setGraph(graph: Graph): void {
         this.current = graph;
@@ -30,8 +37,29 @@ export class GraphState {
         return this._nodeTypeMap.get(name);
     }
 
-    setNodeContent(nodeId: string, content: { text?: string; image?: string }): void {
-        this.nodeContent.set(nodeId, content);
+    setNodeContent(nodeId: string, payload: { text?: string; image?: string; slots?: Record<string, ContentSlot> }): void {
+        let entry = this.nodeContent.get(nodeId);
+        if (!entry) {
+            entry = { slots: new Map() };
+            this.nodeContent.set(nodeId, entry);
+        }
+
+        // Backward compat: text-only payload → default slot
+        if (payload.text !== undefined && !payload.slots) {
+            entry.text = payload.text;
+            entry.slots.set('default', { text: payload.text });
+        }
+
+        if (payload.image !== undefined) {
+            entry.image = payload.image;
+        }
+
+        // Merge named slots incrementally
+        if (payload.slots) {
+            for (const [name, slot] of Object.entries(payload.slots)) {
+                entry.slots.set(name, slot);
+            }
+        }
     }
 
     updateNode(node: Node): void {

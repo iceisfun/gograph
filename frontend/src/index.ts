@@ -48,7 +48,17 @@ async function main() {
             onEventEnd: (p) => { store.animation.endEvent(p.eventID); },
             onEventCancel: (p) => { store.animation.cancelEvent(p.eventID, p.immediate); },
             onNodeContent: (p) => {
-                store.graph.setNodeContent(p.nodeID, { text: p.text, image: p.image });
+                store.graph.setNodeContent(p.nodeID, { text: p.text, image: p.image, slots: p.slots });
+                if (p.slots) {
+                    for (const [name, slot] of Object.entries(p.slots)) {
+                        if (slot.animate && slot.animate !== 'none') {
+                            store.animation.animateTextSlot(
+                                p.nodeID, name, slot.animate,
+                                slot.color || '#ffffff', slot.duration || 300,
+                            );
+                        }
+                    }
+                }
             },
             onConnectionState: (p) => {
                 store.animation.setConnectionState(p.connectionID, p.active, p.value || '');

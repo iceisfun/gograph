@@ -109,10 +109,16 @@ export function drawConnections(
             ctx.setLineDash(theme.connectionActiveDash);
             ctx.lineDashOffset = -((now - activeConn.startTime) / 1000) * theme.connectionActiveDashSpeed;
             ctx.strokeStyle = theme.connectionActiveStroke;
-            ctx.lineWidth = theme.connectionStrokeWidth + 1;
-            ctx.shadowBlur = theme.connectionActiveGlowRadius;
+            ctx.lineWidth = theme.connectionStrokeWidth + 2;
+            ctx.shadowBlur = theme.connectionActiveGlowRadius + 6;
             ctx.shadowColor = theme.connectionActiveGlowColor;
             ctx.stroke();
+            // Additive layer for extra intensity
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 0.3;
+            ctx.stroke();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
             ctx.restore();
         }
 
@@ -124,10 +130,16 @@ export function drawConnections(
             ctx.moveTo(from.x, from.y);
             ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, to.x, to.y);
             ctx.strokeStyle = theme.connectionStateActiveStroke;
-            ctx.lineWidth = theme.connectionStrokeWidth + 1;
-            ctx.shadowBlur = theme.connectionStateActiveGlowRadius;
+            ctx.lineWidth = theme.connectionStrokeWidth + 2;
+            ctx.shadowBlur = theme.connectionStateActiveGlowRadius + 6;
             ctx.shadowColor = theme.connectionStateActiveGlow;
             ctx.stroke();
+            // Additive layer
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 0.25;
+            ctx.stroke();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
             ctx.restore();
         }
     }

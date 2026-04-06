@@ -32,7 +32,7 @@ type nodeRunner struct {
 	config   map[string]string // Go-side mirror of self.config
 	nodeType graph.NodeType
 
-	lastDisplay string // change detection
+	lastSlots map[string]graph.ContentSlot // per-slot change detection
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -58,6 +58,7 @@ func newNodeRunner(
 		inputs:        make(map[string]any),
 		config:        config,
 		nodeType:      nt,
+		lastSlots:     make(map[string]graph.ContentSlot),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -221,16 +222,24 @@ func (nr *nodeRunner) emit(slot string, value any) {
 	}
 }
 
-func (nr *nodeRunner) display(text string) {
-	if text == nr.lastDisplay {
-		return // no change
+func (nr *nodeRunner) display(slotName string, slot graph.ContentSlot) {
+	// Skip change detection if animation requested (always re-trigger).
+	if slot.Animate == "" {
+		if prev, ok := nr.lastSlots[slotName]; ok && prev == slot {
+			return
+		}
 	}
-	nr.lastDisplay = text
-	nr.broker.Publish(nr.graphID, graph.TypeNodeContent, graph.NodeContentPayload{
+	nr.lastSlots[slotName] = slot
+
+	payload := graph.NodeContentPayload{
 		Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
 		NodeID:   nr.nodeID,
-		Text:     text,
-	})
+		Slots:    map[string]graph.ContentSlot{slotName: slot},
+	}
+	if slotName == "default" {
+		payload.Text = slot.Text // backward compat
+	}
+	nr.broker.Publish(nr.graphID, graph.TypeNodeContent, payload)
 }
 
 func (nr *nodeRunner) glow(durationMs int) {

@@ -90,13 +90,24 @@ type NodeActivePayload struct {
 	Duration int    `json:"duration"`
 }
 
+// ContentSlot describes a named text region inside a node's content area.
+type ContentSlot struct {
+	Text     string `json:"text"`
+	Color    string `json:"color,omitempty"`    // CSS color
+	Size     int    `json:"size,omitempty"`     // font size px (0 = theme default)
+	Align    string `json:"align,omitempty"`    // left|center|right
+	Font     string `json:"font,omitempty"`     // monospace|sans-serif
+	Animate  string `json:"animate,omitempty"`  // flash|pulse|none
+	Duration int    `json:"duration,omitempty"` // animation ms
+}
+
 // NodeContentPayload is sent when a node's display content changes.
-// Lua scripts return a "_display" key to set text content inside the node.
 type NodeContentPayload struct {
 	Envelope
-	NodeID string `json:"nodeID"`
-	Text   string `json:"text,omitempty"`
-	Image  string `json:"image,omitempty"`
+	NodeID string                  `json:"nodeID"`
+	Text   string                  `json:"text,omitempty"`            // backward compat
+	Image  string                  `json:"image,omitempty"`
+	Slots  map[string]ContentSlot  `json:"slots,omitempty"`
 }
 
 // ConnectionStatePayload is sent for instant connections to convey the

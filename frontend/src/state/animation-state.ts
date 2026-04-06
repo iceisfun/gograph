@@ -10,6 +10,15 @@ export interface ActiveEvent {
     progress: number;
 }
 
+export interface TextSlotAnimation {
+    nodeID: string;
+    slotName: string;
+    type: 'flash' | 'pulse';
+    color: string;
+    startTime: number;
+    duration: number;
+}
+
 export class AnimationState {
     activeEvents: Map<string, ActiveEvent> = new Map();
     activeNodes: Map<string, { startTime: number; endTime: number }> = new Map();
@@ -18,6 +27,8 @@ export class AnimationState {
     glowingNodes: Map<string, { startTime: number; endTime: number }> = new Map();
     /** Steady state for instant (wiretype) connections. Persists until next update. */
     stateConnections: Map<string, { active: boolean; value: string }> = new Map();
+    /** Text slot animations (flash, pulse). Key: "nodeID:slotName" */
+    textSlotAnimations: Map<string, TextSlotAnimation> = new Map();
 
     activateNode(nodeId: string, durationMs: number): void {
         const now = performance.now();
@@ -36,6 +47,19 @@ export class AnimationState {
     glowNode(nodeId: string, durationMs: number): void {
         const now = performance.now();
         this.glowingNodes.set(nodeId, { startTime: now, endTime: now + durationMs });
+    }
+
+    animateTextSlot(nodeID: string, slotName: string, type: string, color: string, duration: number): void {
+        if (type !== 'flash' && type !== 'pulse') return;
+        const key = `${nodeID}:${slotName}`;
+        this.textSlotAnimations.set(key, {
+            nodeID,
+            slotName,
+            type: type as 'flash' | 'pulse',
+            color,
+            startTime: performance.now(),
+            duration,
+        });
     }
 
     shakeNode(nodeId: string, duration: number = 300, intensity: number = 3): void {
@@ -126,6 +150,13 @@ export class AnimationState {
         for (const [id, shake] of this.shakingNodes) {
             if (now >= shake.startTime + shake.duration) {
                 this.shakingNodes.delete(id);
+            }
+        }
+
+        // Clean up expired text slot animations
+        for (const [key, anim] of this.textSlotAnimations) {
+            if (now >= anim.startTime + anim.duration) {
+                this.textSlotAnimations.delete(key);
             }
         }
     }

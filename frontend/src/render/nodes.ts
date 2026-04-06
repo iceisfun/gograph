@@ -90,12 +90,29 @@ export function drawNodes(
         if (glowState) {
             ctx.save();
             const elapsed = now - glowState.startTime;
-            const pulse = 0.6 + 0.4 * Math.sin(elapsed * 0.004);
-            ctx.shadowBlur = theme.nodeGlowRadius * pulse;
+            const pulse = 0.5 + 0.5 * Math.sin(elapsed * 0.005);
+
+            // Strong shadow glow
+            ctx.shadowBlur = (theme.nodeGlowRadius + 10) * pulse;
             ctx.shadowColor = theme.nodeGlowColor;
             drawRoundedRect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, theme.nodeCornerRadius);
             ctx.fillStyle = nodeFill;
             ctx.fill();
+
+            // Additive radial gradient overlay for extra intensity
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 0.15 * pulse;
+            const cx = bounds.x + bounds.width / 2;
+            const cy = bounds.y + bounds.height / 2;
+            const r = Math.max(bounds.width, bounds.height) * 0.7;
+            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+            grad.addColorStop(0, theme.nodeGlowColor);
+            grad.addColorStop(0.4, theme.nodeGlowColor);
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(bounds.x - r, bounds.y - r, bounds.width + r * 2, bounds.height + r * 2);
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 1;
             ctx.restore();
         }
 
@@ -252,11 +269,10 @@ export function drawNodes(
             }
         }
 
-        // Draw content area
+        // Draw content area (multi-slot)
         const content = store.graph.nodeContent.get(node.id);
         const contentH = nodeType?.contentHeight || 0;
-        if (content?.text && contentH > 0) {
-            // Content area is below slots
+        if (content && contentH > 0 && content.slots.size > 0) {
             const contentSlotLayouts = store.graph.getSlotLayouts(node.id);
             let leftCount = 0, rightCount = 0;
             if (contentSlotLayouts) {
@@ -276,16 +292,67 @@ export function drawNodes(
             ctx.lineWidth = 0.5;
             ctx.stroke();
 
-            // Text (clipped to content area)
+            // Clip to content area
             ctx.save();
             ctx.beginPath();
             ctx.rect(bounds.x + 4, contentY + 2, bounds.width - 8, contentH - 4);
             ctx.clip();
-            ctx.fillStyle = theme.nodeContentText;
-            ctx.font = theme.nodeContentFont;
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'top';
-            ctx.fillText(content.text, bounds.x + 8, contentY + 6);
+
+            const now = performance.now();
+            const slotCount = content.slots.size;
+            const lineHeight = Math.min(contentH - 4, Math.max(14, (contentH - 4) / slotCount));
+            let yOffset = 0;
+
+            for (const [slotName, slot] of content.slots) {
+                const drawY = contentY + 4 + yOffset;
+
+                // Font
+                const fontSize = slot.size || 11;
+                const fontFamily = slot.font || 'monospace';
+                ctx.font = `${fontSize}px ${fontFamily}`;
+
+                // Alignment
+                const align = (slot.align || 'left') as CanvasTextAlign;
+                ctx.textAlign = align;
+                let textX: number;
+                if (align === 'center') {
+                    textX = bounds.x + bounds.width / 2;
+                } else if (align === 'right') {
+                    textX = bounds.x + bounds.width - 8;
+                } else {
+                    textX = bounds.x + 8;
+                }
+                ctx.textBaseline = 'top';
+
+                // Color (may be animated)
+                let textColor = slot.color || theme.nodeContentText;
+                const animKey = `${node.id}:${slotName}`;
+                const anim = store.animation.textSlotAnimations.get(animKey);
+
+                if (anim) {
+                    const elapsed = now - anim.startTime;
+                    const t = Math.min(1, elapsed / anim.duration);
+
+                    if (anim.type === 'flash') {
+                        // Show animation color, fade back
+                        textColor = t < 0.5 ? anim.color : (slot.color || theme.nodeContentText);
+                    } else if (anim.type === 'pulse') {
+                        const alpha = 0.3 + 0.7 * Math.abs(Math.sin(elapsed * 0.01));
+                        ctx.globalAlpha = alpha;
+                        textColor = anim.color;
+                    }
+                }
+
+                ctx.fillStyle = textColor;
+                ctx.fillText(slot.text, textX, drawY);
+
+                if (anim?.type === 'pulse') {
+                    ctx.globalAlpha = 1;
+                }
+
+                yOffset += lineHeight;
+            }
+
             ctx.restore();
         }
 
