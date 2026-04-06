@@ -336,6 +336,32 @@ func (e *Engine) updateNodeLabel(nodeID, label string) {
 	})
 }
 
+// InjectContent populates each node's Content map with the current
+// display state from running node runners. Call this on a graph snapshot
+// before sending it to a new SSE client.
+func (e *Engine) InjectContent(g *graph.Graph) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	for nodeID, nr := range e.nodes {
+		nr.contentMu.RLock()
+		if len(nr.contentSlots) == 0 {
+			nr.contentMu.RUnlock()
+			continue
+		}
+		node := g.Node(nodeID)
+		if node == nil {
+			nr.contentMu.RUnlock()
+			continue
+		}
+		node.Content = make(map[string]graph.ContentSlot, len(nr.contentSlots))
+		for k, v := range nr.contentSlots {
+			node.Content[k] = v
+		}
+		nr.contentMu.RUnlock()
+	}
+}
+
 // Sync reconciles the running engine state with the stored graph.
 // Nodes/connections that were removed from the graph are shut down.
 // Nodes/connections that were added are started. Called after the graph

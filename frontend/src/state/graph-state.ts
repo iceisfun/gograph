@@ -19,6 +19,15 @@ export class GraphState {
 
     setGraph(graph: Graph): void {
         this.current = graph;
+
+        // Seed nodeContent from any content injected into the graph snapshot.
+        for (const node of Object.values(graph.nodes)) {
+            if (node.content) {
+                for (const [name, slot] of Object.entries(node.content)) {
+                    this.setNodeContent(node.id, { slots: { [name]: slot } });
+                }
+            }
+        }
     }
 
     setNodeTypes(types: NodeType[]): void {

@@ -12,6 +12,7 @@ export interface Node {
     label: string;
     position: Position;
     config?: Record<string, string>;
+    content?: Record<string, import('../core/protocol.js').ContentSlot>;
 }
 
 export interface Position {

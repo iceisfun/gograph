@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/iceisfun/gograph/graph"
@@ -35,7 +36,9 @@ type nodeRunner struct {
 	config   map[string]string // Go-side mirror of self.config
 	nodeType graph.NodeType
 
-	lastSlots   map[string]string // per-slot change detection (stores last JSON)
+	lastSlots    map[string]string          // per-slot change detection (stores last JSON)
+	contentMu    sync.RWMutex
+	contentSlots map[string]graph.ContentSlot // current content for SSE seed
 	lastLabel   string
 	updateLabel func(nodeID, label string)
 
@@ -67,7 +70,8 @@ func newNodeRunner(
 		stateOutputs:  make(map[string]any),
 		config:        config,
 		nodeType:      nt,
-		lastSlots:     make(map[string]string),
+		lastSlots:      make(map[string]string),
+		contentSlots:   make(map[string]graph.ContentSlot),
 		ctx:           ctx,
 		cancel:        cancel,
 	}
@@ -279,6 +283,9 @@ func (nr *nodeRunner) display(slotName string, slot graph.ContentSlot) {
 		return
 	}
 	nr.lastSlots[slotName] = keyStr
+	nr.contentMu.Lock()
+	nr.contentSlots[slotName] = slot
+	nr.contentMu.Unlock()
 
 	payload := graph.NodeContentPayload{
 		Envelope: graph.NewEnvelope(time.Now().UnixMilli()),

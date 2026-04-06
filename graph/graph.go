@@ -71,11 +71,69 @@ type Slot struct {
 // Node is a positioned vertex in the graph. It references a [NodeType] by
 // name and stores canvas coordinates for rendering.
 type Node struct {
-	ID       string            `json:"id"`
-	Type     string            `json:"type"`
-	Label    string            `json:"label"`
-	Position Position          `json:"position"`
-	Config   map[string]string `json:"config,omitempty"`
+	ID       string                    `json:"id"`
+	Type     string                    `json:"type"`
+	Label    string                    `json:"label"`
+	Position Position                  `json:"position"`
+	Config   map[string]string         `json:"config,omitempty"`
+	Content  map[string]ContentSlot    `json:"-"` // runtime display state, injected at SSE time
+}
+
+// MarshalJSON serializes the node, including Content when populated.
+func (n *Node) MarshalJSON() ([]byte, error) {
+	type Alias struct {
+		ID       string                       `json:"id"`
+		Type     string                       `json:"type"`
+		Label    string                       `json:"label"`
+		Position Position                     `json:"position"`
+		Config   map[string]string            `json:"config,omitempty"`
+		Content  map[string]json.RawMessage   `json:"content,omitempty"`
+	}
+	a := Alias{ID: n.ID, Type: n.Type, Label: n.Label, Position: n.Position, Config: n.Config}
+	if len(n.Content) > 0 {
+		a.Content = make(map[string]json.RawMessage, len(n.Content))
+		for k, v := range n.Content {
+			raw, err := json.Marshal(v)
+			if err != nil {
+				return nil, err
+			}
+			a.Content[k] = raw
+		}
+	}
+	return json.Marshal(a)
+}
+
+// UnmarshalJSON deserializes the node. Content slots are decoded
+// polymorphically if present.
+func (n *Node) UnmarshalJSON(data []byte) error {
+	type Alias struct {
+		ID       string                       `json:"id"`
+		Type     string                       `json:"type"`
+		Label    string                       `json:"label"`
+		Position Position                     `json:"position"`
+		Config   map[string]string            `json:"config,omitempty"`
+		Content  map[string]json.RawMessage   `json:"content,omitempty"`
+	}
+	var a Alias
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	n.ID = a.ID
+	n.Type = a.Type
+	n.Label = a.Label
+	n.Position = a.Position
+	n.Config = a.Config
+	if len(a.Content) > 0 {
+		n.Content = make(map[string]ContentSlot, len(a.Content))
+		for k, raw := range a.Content {
+			s, err := unmarshalContentSlot(raw)
+			if err != nil {
+				return err
+			}
+			n.Content[k] = s
+		}
+	}
+	return nil
 }
 
 // ConnectionKind distinguishes event-driven connections (discrete messages

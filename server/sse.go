@@ -100,6 +100,11 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	ch := s.broker.subscribe(graphID)
 	defer s.broker.unsubscribe(graphID, ch)
 
+	// Inject current display content into nodes before sending.
+	if s.engine != nil {
+		s.engine.InjectContent(g)
+	}
+
 	// Send the full graph state on connect.
 	snapshot := graph.GraphUpdatePayload{
 		Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
