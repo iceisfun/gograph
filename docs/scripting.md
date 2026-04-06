@@ -11,7 +11,10 @@ runs once to define/override handlers and helper functions. Then the
 engine calls the appropriate handler:
 
 1. **Script setup** — top-level code runs (define helpers, override handlers)
-2. **Handler call** — engine calls `on_event(e)` or `on_click()` via ProtectedCall
+2. **Handler call** — engine calls the appropriate handler via ProtectedCall:
+   - `on_event(e)` for ticks, arrivals, and re-evaluations
+   - `on_click()` for user clicks
+   - `on_change(e)`, `on_high(e)`, `on_low(e)` for state input changes
 3. **Collect results** — outputs, display, glow, config updates are collected
 
 Each execution creates a **fresh sandboxed VM** — no state persists
@@ -41,6 +44,23 @@ one). Use `e.value` for direct access to the value that just arrived.
 function node:on_event(e)
     local data = e.value or self.inputs["in"]
     self.outputs.out = string.lower(tostring(data or ""))
+end
+```
+
+### on_change(e) / on_high(e) / on_low(e)
+
+State input handlers. Called when a state connection delivers a changed
+value. The `e` table has: `e.slot`, `e.value`, `e.prev`, `e.source`.
+
+- `on_high(e)` — state input went from falsy to truthy (fires before `on_change`)
+- `on_low(e)` — state input went from truthy to falsy (fires before `on_change`)
+- `on_change(e)` — any state input change (always fires)
+
+```lua
+function node:on_change(e)
+    local a = self.inputs.a
+    local b = self.inputs.b
+    self:set("out", (a == "1" and b == "1") and "1" or "0")
 end
 ```
 
@@ -80,14 +100,18 @@ self.incoming       -- array of Connection objects
 self.outgoing       -- array of Connection objects
 
 -- Methods
-self:display(text)     -- set node display content
+self:emit(slot, val)   -- send event output (discrete message)
+self:set(slot, val)    -- set state output (change-detected)
+self:display(text)     -- set node display content (default slot)
+self:display(slot, text, opts) -- named slot with style options
+self:set_label(label)  -- update display label at runtime
 self:glow(ms)          -- trigger glow animation
 self:set_config(k, v)  -- update config (persisted by engine)
 self:log(msg)          -- log with node ID prefix
 ```
 
 Connection objects have: `id`, `from_node`, `from_slot`, `to_node`,
-`to_slot`, `config`, `duration`.
+`to_slot`, `config`, `kind`, `duration`.
 
 See [node.md](node.md), [connection.md](connection.md), and
 [event.md](event.md) for full API documentation.
@@ -138,10 +162,10 @@ function node:on_event(e)
 end
 ```
 
-### Interactive Toggle (click + event)
+### Interactive Toggle (state output)
 
 The click handler toggles state. The engine then calls `on_event` with
-`e.type == "eval"` so the node can update its output and display.
+`e.type == "eval"` so the node can update its state output and display.
 
 ```lua
 function node:on_click()
@@ -154,8 +178,60 @@ end
 
 function node:on_event(e)
     local on = self.config.state == "on"
-    self.outputs.out = on and "1" or "0"
+    self:set("out", on and "1" or "0")
     self:display(on and "ON" or "OFF")
+end
+```
+
+### State Source
+
+A source node that produces state output. Uses `self:set()` so
+downstream state wires get change detection and steady-glow rendering.
+
+```lua
+function node:on_event(e)
+    local period = tonumber(self.config.period) or 2000
+    local phase = math.floor(time.now() / period) % 2
+    self:set("out", phase == 0 and "1" or "0")
+    self:display(phase == 0 and "ON" or "OFF")
+end
+```
+
+### State Logic Gate
+
+Reacts to state input changes with `on_change`. Reads all inputs and
+produces a state output.
+
+```lua
+local function truthy(v)
+    return v == "1" or v == "true" or v == "on"
+end
+
+function node:on_change(e)
+    local a = truthy(self.inputs.a)
+    local b = truthy(self.inputs.b)
+    self:set("out", (a and b) and "1" or "0")
+end
+```
+
+### Mixed Node (state enable + event data passthrough)
+
+A switch that uses a state input for enable/disable and passes event
+data through when enabled.
+
+```lua
+function node:on_high(e)
+    self:display("OPEN")
+end
+
+function node:on_low(e)
+    self:display("CLOSED")
+end
+
+function node:on_event(e)
+    if e.type == "arrival" and self.inputs.enable == "1" then
+        self:emit("out", e.value)
+    end
 end
 ```
 
@@ -172,7 +248,7 @@ end
 
 function node:on_event(e)
     if self.config.state == "on" then
-        self.outputs.out = self.inputs["in"]
+        self:emit("out", self.inputs["in"])
         self:display("OPEN")
     else
         self:display("CLOSED")

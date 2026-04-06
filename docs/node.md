@@ -23,6 +23,44 @@ function node:on_event(e)
 end
 ```
 
+### function node:on_change(e)
+
+Called when a state input changes value. The `e` table contains:
+`e.slot`, `e.value`, `e.prev`, `e.source`. Fires after `on_high`/`on_low`
+(if applicable). See [event.md](event.md) for the full schema.
+
+```lua
+function node:on_change(e)
+    local a = self.inputs.a
+    local b = self.inputs.b
+    self:set("out", (a == "1" and b == "1") and "1" or "0")
+end
+```
+
+### function node:on_high(e)
+
+Called when a state input transitions from falsy to truthy. Same `e`
+table as `on_change`. Fires before `on_change`.
+
+```lua
+function node:on_high(e)
+    self:set("out", "1")
+    self:display("ON")
+end
+```
+
+### function node:on_low(e)
+
+Called when a state input transitions from truthy to falsy. Same `e`
+table as `on_change`. Fires before `on_change`.
+
+```lua
+function node:on_low(e)
+    self:set("out", "0")
+    self:display("OFF")
+end
+```
+
 ### function node:on_click()
 
 Called when a user clicks an interactive node. Use `self:set_config()`
@@ -90,7 +128,34 @@ previously written values. Only string keys are captured.
 
 ## Methods
 
-### self:display(text)
+### self:emit(slot, val)
+
+Sends a value on an event output slot. Every call triggers propagation.
+
+```lua
+self:emit("out", "hello")
+```
+
+### self:set(slot, val)
+
+Sets a state output slot with change detection. Only propagates when the
+value differs from the previous one.
+
+```lua
+self:set("out", "1")
+self:set("level", tostring(voltage))
+```
+
+### self:set_label(label)
+
+Updates the node's display label at runtime. Broadcasts a `node.update`
+SSE event.
+
+```lua
+self:set_label("Switch (ON)")
+```
+
+### self:display(text)  /  self:display(slotName, text, opts)
 
 Sets the text content rendered inside the node body on the canvas.
 
@@ -99,8 +164,16 @@ self:display("ON")
 self:display(tostring(count))
 ```
 
+Named-slot form with optional style table:
+
+```lua
+self:display("status", "ACTIVE", { color = "#0f0", animate = "pulse", duration = 500 })
+self:display("value", tostring(reading))
+```
+
 Accepts strings and numbers. Triggers a `node.content` SSE event with
 change detection (only emits when the display value actually changes).
+See [event.md](event.md) for the full list of style options.
 
 ### self:glow(duration_ms)
 
@@ -174,10 +247,10 @@ function node:on_event(e)
 end
 ```
 
-### Interactive node with click + event
+### Interactive toggle with state output
 
 ```lua
--- toggle.lua
+-- toggle.lua (uses set() for state output)
 function node:on_click()
     if self.config.state == "on" then
         self:set_config("state", "off")
@@ -188,8 +261,31 @@ end
 
 function node:on_event(e)
     local on = self.config.state == "on"
-    self.outputs.out = on and "1" or "0"
+    self:set("out", on and "1" or "0")
     self:display(on and "ON" or "OFF")
+end
+```
+
+### State logic gate
+
+```lua
+-- and_gate.lua (reacts to state input changes)
+function node:on_change(e)
+    local a = self.inputs.a
+    local b = self.inputs.b
+    self:set("out", (a == "1" and b == "1") and "1" or "0")
+end
+```
+
+### State source
+
+```lua
+-- oscillator.lua (state output with set())
+function node:on_event(e)
+    local period = tonumber(self.config.period) or 2000
+    local phase = math.floor(time.now() / period) % 2
+    self:set("out", phase == 0 and "1" or "0")
+    self:display(phase == 0 and "ON" or "OFF")
 end
 ```
 

@@ -19,7 +19,7 @@ Canvas-based graph engine with a Go backend and embedded TypeScript frontend.
 ```
 
 - **graph/** - Core types: Graph, Node, Slot, Connection, NodeType, SSE wire protocol
-- **engine/** - Topological graph execution with real-time event emission
+- **engine/** - Goroutine-per-node graph execution with event and state connections
 - **lua/** - Sandboxed Lua node scripting via [golua](https://github.com/iceisfun/golua)
 - **server/** - HTTP server with REST API, SSE streaming, static file serving
 - **store/** - Persistence interface with JSON file and in-memory implementations
@@ -80,12 +80,20 @@ mux.Handle("/graph/", graphServer.Handler())
 
 ## Lua Node Scripting
 
-Node types can include Lua scripts that receive inputs and return outputs:
+Node types can include Lua scripts with event handlers. Connections come
+in two kinds: **event connections** carry discrete messages (animated dot
+traversal) and **state connections** carry continuous values (steady glow).
 
 ```lua
--- inputs["in"] comes from upstream connections
-local data = inputs["in"]
-return { out = string.upper(data) }
+-- Event output: self:emit(slot, val) — discrete message
+function node:on_event(e)
+    self:emit("out", string.upper(e.value or ""))
+end
+
+-- State output: self:set(slot, val) — change-detected
+function node:on_change(e)
+    self:set("out", self.inputs.a == "1" and "1" or "0")
+end
 ```
 
 Each execution runs in a fresh sandboxed VM with limited instructions and
@@ -112,3 +120,4 @@ make test
 - **[basic](examples/basic/)** - Minimal graph with source, transform, and sink nodes
 - **[embedded](examples/embedded/)** - Mounting GoGraph within a larger HTTP application
 - **[lua](examples/lua/)** - Lua-scripted node execution with animated events
+- **[showcase](examples/showcase/)** - Full demo with oscillators, toggles, logic gates, state and event connections

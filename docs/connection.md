@@ -14,24 +14,39 @@ to a node. They are accessible from scripts via `node.incoming` and
 | `conn.to_node`    | string | Target node ID                           |
 | `conn.to_slot`    | string | Target slot ID                           |
 | `conn.config`     | table  | Per-connection config (string key/value) |
-| `conn.duration`   | number | Traversal duration in ms (0 = instant)   |
+| `conn.kind`       | string | `"event"` or `"state"`                   |
+| `conn.duration`   | number | Traversal duration in ms (event only)    |
 
 All fields are read-only. The `duration` field is a convenience shortcut
-derived from `conn.config.duration`.
+derived from `conn.config.duration` (only meaningful for event connections).
 
-## Connection Types
+## Connection Kinds
 
-### Instant (duration = 0)
+`Connection` is an interface in Go with two concrete types. The kind is
+determined by the source slot's `DataType` via `SlotConnectionKind()`:
 
-Instant connections propagate values forward immediately when any upstream
-value changes. The engine uses `connection.state` SSE events for these —
-wires glow when the value is truthy, dim when falsy.
+- **State-like types** (`"state"`, `"bool"`, `"coil"`, `"register"`, `"numeric"`, `"value"`) produce a `StateConnection`.
+- **Everything else** (e.g. `"string"`, `"any"`) produces an `EventConnection`.
 
-### Timed (duration > 0)
+### State Connections (kind = "state")
 
-Timed connections animate a dot traversing the wire over the specified
-duration. The engine emits `event.start` and `event.end` SSE events.
-Downstream nodes wait for the traversal to complete before executing.
+State connections carry a continuous value — something that "is" rather
+than a message that "travels". The engine uses `connection.state` SSE
+events on value change. The frontend renders a steady glow when the
+value is truthy, dim when falsy. No dot animation.
+
+State connections are created with `self:set(slot, val)` on the source
+node. The engine performs change detection and only propagates when the
+value actually changes.
+
+### Event Connections (kind = "event")
+
+Event connections carry discrete messages with optional traversal
+animation. The engine emits `event.start` and `event.end` SSE events.
+An animated dot traverses the wire over the configured duration.
+
+Event connections are created with `self:emit(slot, val)` on the source
+node. Every call triggers propagation regardless of the previous value.
 
 ## Accessing Connections
 
@@ -40,11 +55,19 @@ Downstream nodes wait for the traversal to complete before executing.
 local n = #node.outgoing
 node:log("connected to " .. n .. " downstream nodes")
 
--- Find all instant downstream connections
+-- Find all state connections
 for i = 1, #node.outgoing do
     local conn = node.outgoing[i]
-    if conn.duration == 0 then
-        node:log("instant wire to " .. conn.to_node)
+    if conn.kind == "state" then
+        node:log("state wire to " .. conn.to_node)
+    end
+end
+
+-- Find event connections with traversal delay
+for i = 1, #node.outgoing do
+    local conn = node.outgoing[i]
+    if conn.kind == "event" and conn.duration > 0 then
+        node:log("delayed event wire to " .. conn.to_node)
     end
 end
 
@@ -67,19 +90,48 @@ end
 
 ## Go-Side Representation
 
-Connections are defined in `graph.Connection`:
+`Connection` is an interface in `graph`:
 
 ```go
-type Connection struct {
-    ID       string            `json:"id"`
-    FromNode string            `json:"fromNode"`
-    FromSlot string            `json:"fromSlot"`
-    ToNode   string            `json:"toNode"`
-    ToSlot   string            `json:"toSlot"`
-    Config   map[string]string `json:"config,omitempty"`
+type Connection interface {
+    GetID() string
+    GetFromNode() string
+    GetFromSlot() string
+    GetToNode() string
+    GetToSlot() string
+    GetConfig() map[string]string
+    Kind() ConnectionKind
 }
 ```
 
+Two concrete types implement it:
+
+```go
+// EventConnection carries discrete messages with optional traversal animation.
+type EventConnection struct {
+    BaseConnection
+    Duration int `json:"duration,omitempty"`
+}
+
+// StateConnection carries continuous state. The wire publishes
+// connection.state SSE events on value change rather than animating
+// a traversal dot.
+type StateConnection struct {
+    BaseConnection
+    StateDataType string `json:"stateDataType,omitempty"`
+}
+```
+
+`ConnectionKind` is either `EventKind` or `StateKind`. Use
+`SlotConnectionKind(dataType)` to determine which kind a slot implies:
+
+```go
+// "state", "bool", "coil", "register", "numeric", "value" → StateKind
+// everything else → EventKind
+func SlotConnectionKind(dataType string) ConnectionKind
+```
+
 The Lua binding creates a plain table snapshot for each connection with
-the fields listed above. The `duration` field is parsed from
-`Config["duration"]` as a convenience.
+the fields listed above. The `kind` field is set to `"event"` or
+`"state"`. The `duration` field is parsed from `Config["duration"]` as
+a convenience (event connections only).

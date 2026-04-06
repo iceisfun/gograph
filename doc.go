@@ -5,10 +5,13 @@
 //
 // The system is organized into several packages:
 //
-//   - [graph] defines the core data model: Graph, Node, Slot, Connection,
-//     NodeType, and the SSE wire protocol event types.
-//   - [engine] provides graph execution via topological traversal and
-//     emits real-time events for visualization.
+//   - [graph] defines the core data model: Graph, Node, Slot, NodeType,
+//     and the SSE wire protocol event types. [graph.Connection] is an
+//     interface with two concrete types: [graph.EventConnection] (discrete
+//     messages with dot animation) and [graph.StateConnection] (continuous
+//     state with steady glow).
+//   - [engine] provides goroutine-per-node graph execution with channel-based
+//     connections and emits real-time events for visualization.
 //   - [lua] implements node execution using embedded Lua (golua), providing
 //     a sandboxed scripting environment.
 //   - [server] provides an HTTP server with REST API for graph management,

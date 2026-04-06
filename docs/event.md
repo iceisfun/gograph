@@ -74,6 +74,53 @@ function node:on_event(e)
 end
 ```
 
+### on_change(e)
+
+Called when a state input changes value. The `e` parameter is a table
+describing the change.
+
+#### Change event table fields
+
+| Field      | Type   | Description                              |
+|------------|--------|------------------------------------------|
+| `e.slot`   | string | Input slot that changed                  |
+| `e.value`  | any    | New value                                |
+| `e.prev`   | any    | Previous value (nil on first change)     |
+| `e.source` | string | Upstream node ID                         |
+
+```lua
+function node:on_change(e)
+    self:log(e.slot .. " changed from " .. tostring(e.prev) .. " to " .. tostring(e.value))
+    local a = self.inputs.a
+    local b = self.inputs.b
+    self:set("out", (a == "1" and b == "1") and "1" or "0")
+end
+```
+
+### on_high(e)
+
+Called when a state input transitions from falsy to truthy (same `e`
+table as `on_change`). Fires before `on_change`.
+
+```lua
+function node:on_high(e)
+    self:set("out", "1")
+    self:display("ON")
+end
+```
+
+### on_low(e)
+
+Called when a state input transitions from truthy to falsy (same `e`
+table as `on_change`). Fires before `on_change`.
+
+```lua
+function node:on_low(e)
+    self:set("out", "0")
+    self:display("OFF")
+end
+```
+
 ### on_click()
 
 Called when a user clicks an interactive node. The handler typically
@@ -92,22 +139,72 @@ end
 
 ## Side-Effect Methods
 
-### self:display(text)
+### self:emit(slot, val)
 
-Emits a `node.content` SSE event that updates the text rendered inside
+Sends a value on an event output slot. Every call triggers propagation
+regardless of the previous value. Use this for discrete messages.
+
+```lua
+self:emit("out", "hello")
+self:emit("data", tostring(42))
+```
+
+### self:set(slot, val)
+
+Sets a state output slot. The engine performs change detection and only
+propagates when the value differs from the previous one. Use this for
+continuous state (booleans, levels, registers).
+
+```lua
+self:set("out", "1")
+self:set("level", tostring(voltage))
+```
+
+### self:set_label(label)
+
+Updates the node's display label at runtime. The change is broadcast
+via a `node.update` SSE event.
+
+```lua
+self:set_label("Switch (ON)")
+```
+
+### self:display(text)  /  self:display(slotName, text, opts)
+
+Emits a `node.content` SSE event that updates text rendered inside
 the node body on the canvas.
+
+**Single-argument form** (default slot):
 
 ```lua
 self:display("ON")
 self:display(tostring(42))
 ```
 
-**Change detection**: The engine tracks the last display value per node.
-If the script sets the same display text as the previous execution, no
-SSE event is emitted.
+**Named-slot form** with optional style table:
+
+```lua
+self:display("status", "ACTIVE", { color = "#0f0", animate = "pulse", duration = 500 })
+self:display("value", tostring(reading))
+```
+
+Style options:
+
+| Key        | Type   | Description                              |
+|------------|--------|------------------------------------------|
+| `color`    | string | CSS color                                |
+| `size`     | number | Font size in px (0 = theme default)      |
+| `align`    | string | `"left"`, `"center"`, or `"right"`       |
+| `font`     | string | `"monospace"` or `"sans-serif"`          |
+| `animate`  | string | `"flash"`, `"pulse"`, or `"none"`        |
+| `duration` | number | Animation duration in ms                 |
+
+**Change detection**: The engine tracks the last display value per slot.
+If the script sets the same display text and options as the previous
+execution, no SSE event is emitted.
 
 **Type**: `node.content`
-**Payload**: `{ nodeID, text }`
+**Payload**: `{ nodeID, slots: { slotName: { text, color, ... } } }`
 
 ### self:glow(duration_ms)
 
@@ -142,16 +239,16 @@ controllable from scripts:
 
 ### connection.state
 
-Emitted for instant connections (duration = 0) when the upstream value
-changes. The frontend renders the wire as glowing (active) or dim
-(inactive) based on the value truthiness.
+Emitted by `StateWire` when the upstream state value changes. The
+frontend renders the wire with a steady glow when the value is truthy,
+dim when falsy.
 
 **Active**: value is not empty, `"0"`, `"false"`, `"off"`, or `nil`
 
 ### event.start / event.end
 
-Emitted for timed connections (duration > 0). An animated dot traverses
-the wire over the specified duration. `event.start` spawns the dot,
+Emitted for `EventConnection` wires only. An animated dot traverses
+the wire over the configured duration. `event.start` spawns the dot,
 `event.end` removes it on arrival.
 
 ### event.cancel
