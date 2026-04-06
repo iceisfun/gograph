@@ -1,4 +1,3 @@
-# Frontend build artifacts
-frontend/dist/bundle.js
+# Frontend build artifacts (bundle.js is committed for go:embed)
 frontend/dist/bundle.js.map
 frontend/node_modules/
