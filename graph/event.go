@@ -124,5 +124,5 @@ type ConnectionStatePayload struct {
 // ConnectionUpdatePayload is sent when a single connection is added or modified.
 type ConnectionUpdatePayload struct {
 	Envelope
-	Connection *Connection `json:"connection"`
+	Connection Connection `json:"connection"`
 }

@@ -186,6 +186,7 @@ func buildDefineBinding(def *defineContext) *vm.Table {
 	// --- Runtime methods (noops during define) ---
 	noop := vm.NewNativeFunc(func(v *vm.VM) int { return 0 })
 	node.SetString("emit", noop)
+	node.SetString("set", noop)
 	node.SetString("display", noop)
 	node.SetString("glow", noop)
 	node.SetString("log", noop)

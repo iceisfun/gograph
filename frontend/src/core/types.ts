@@ -28,11 +28,14 @@ export interface Slot {
 
 export interface Connection {
     id: string;
+    kind?: 'event' | 'state';
     fromNode: string;
     fromSlot: string;
     toNode: string;
     toSlot: string;
     config?: Record<string, string>;
+    duration?: number;
+    stateDataType?: string;
 }
 
 export interface NodeType {

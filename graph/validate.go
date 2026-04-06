@@ -22,6 +22,14 @@ func CanConnect(from, to Slot) error {
 	if from.DataType != "any" && to.DataType != "any" && from.DataType != to.DataType {
 		return fmt.Errorf("incompatible data types: %q -> %q", from.DataType, to.DataType)
 	}
+	// Check connection kind compatibility (unless either is "any").
+	if from.DataType != "any" && to.DataType != "any" {
+		if SlotConnectionKind(from.DataType) != SlotConnectionKind(to.DataType) {
+			return fmt.Errorf("incompatible connection kinds: %q (%s) -> %q (%s)",
+				from.DataType, SlotConnectionKind(from.DataType),
+				to.DataType, SlotConnectionKind(to.DataType))
+		}
+	}
 	return nil
 }
 
@@ -46,31 +54,31 @@ func (g *Graph) ValidateWith(r *Registry, validator ConnectionValidator) error {
 
 	// Validate all connections.
 	for _, c := range g.Connections {
-		fromNode, ok := g.Nodes[c.FromNode]
+		fromNode, ok := g.Nodes[c.GetFromNode()]
 		if !ok {
-			return fmt.Errorf("connection %q references unknown source node %q", c.ID, c.FromNode)
+			return fmt.Errorf("connection %q references unknown source node %q", c.GetID(), c.GetFromNode())
 		}
-		toNode, ok := g.Nodes[c.ToNode]
+		toNode, ok := g.Nodes[c.GetToNode()]
 		if !ok {
-			return fmt.Errorf("connection %q references unknown target node %q", c.ID, c.ToNode)
+			return fmt.Errorf("connection %q references unknown target node %q", c.GetID(), c.GetToNode())
 		}
 
 		fromType, _ := r.Lookup(fromNode.Type)
 		toType, _ := r.Lookup(toNode.Type)
 
-		fromSlot, ok := fromType.SlotByID(c.FromSlot)
+		fromSlot, ok := fromType.SlotByID(c.GetFromSlot())
 		if !ok {
 			return fmt.Errorf("connection %q references unknown slot %q on node %q (type %q)",
-				c.ID, c.FromSlot, c.FromNode, fromNode.Type)
+				c.GetID(), c.GetFromSlot(), c.GetFromNode(), fromNode.Type)
 		}
-		toSlot, ok := toType.SlotByID(c.ToSlot)
+		toSlot, ok := toType.SlotByID(c.GetToSlot())
 		if !ok {
 			return fmt.Errorf("connection %q references unknown slot %q on node %q (type %q)",
-				c.ID, c.ToSlot, c.ToNode, toNode.Type)
+				c.GetID(), c.GetToSlot(), c.GetToNode(), toNode.Type)
 		}
 
 		if err := validator(fromSlot, toSlot); err != nil {
-			return fmt.Errorf("connection %q: %w", c.ID, err)
+			return fmt.Errorf("connection %q: %w", c.GetID(), err)
 		}
 	}
 

@@ -52,9 +52,9 @@ func main() {
 	must(g.AddNode(&graph.Node{ID: "n2", Type: "transform", Label: "Filter", Position: graph.Position{X: 400, Y: 150}}))
 	must(g.AddNode(&graph.Node{ID: "n3", Type: "transform", Label: "Map", Position: graph.Position{X: 400, Y: 350}}))
 	must(g.AddNode(&graph.Node{ID: "n4", Type: "sink", Label: "Output", Position: graph.Position{X: 700, Y: 250}}))
-	must(g.Connect(&graph.Connection{ID: "c1", FromNode: "n1", FromSlot: "out", ToNode: "n2", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c2", FromNode: "n1", FromSlot: "out", ToNode: "n3", ToSlot: "in"}))
-	must(g.Connect(&graph.Connection{ID: "c3", FromNode: "n2", FromSlot: "out", ToNode: "n4", ToSlot: "in"}))
+	must(g.Connect(graph.NewEventConnection("c1", "n1", "out", "n2", "in", nil)))
+	must(g.Connect(graph.NewEventConnection("c2", "n1", "out", "n3", "in", nil)))
+	must(g.Connect(graph.NewEventConnection("c3", "n2", "out", "n4", "in", nil)))
 
 	// Persist the graph.
 	st := store.NewMemoryStore()

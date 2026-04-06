@@ -6,10 +6,16 @@ node:add_input("in", "Input", "any")
 node:add_output("out", "Output", "any")
 node:define_config("rate", "2000", "Rate (ms)")
 
+function node:update_title()
+    local ms = tonumber(self.config.rate) or 2000
+    self:set_label("Rate Limit " .. ms .. "ms")
+end
+
 function node:on_init()
     self.state.qh = 1
     self.state.qt = 1
     self.state.last_emit = 0
+    self:update_title()
 end
 
 function node:on_event(e)
@@ -71,7 +77,7 @@ function node:drain()
 end
 
 function node:on_config()
-    -- Config changed; nothing to restart (schedule_tick is demand-driven).
+    self:update_title()
 end
 
 function node:on_disconnect(e)

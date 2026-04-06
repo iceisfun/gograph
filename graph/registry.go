@@ -61,6 +61,18 @@ func (nt NodeType) SlotByID(id string) (Slot, bool) {
 	return Slot{}, false
 }
 
+// SlotConnectionKind returns the connection kind implied by a slot's DataType.
+// State-like types ("state", "bool", "coil", "register", "numeric", "value")
+// produce [StateKind]; everything else produces [EventKind].
+func SlotConnectionKind(dataType string) ConnectionKind {
+	switch dataType {
+	case "state", "bool", "coil", "register", "numeric", "value":
+		return StateKind
+	default:
+		return EventKind
+	}
+}
+
 // Registry manages registered [NodeType] definitions. It is safe for
 // concurrent use.
 type Registry struct {

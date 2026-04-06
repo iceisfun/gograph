@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/iceisfun/gograph/graph"
 	"github.com/iceisfun/gograph/store"
@@ -22,7 +23,7 @@ type Engine struct {
 	broker   EventBroker
 
 	nodes map[string]*nodeRunner // nodeID → runner
-	wires map[string]*Wire      // connID → wire
+	wires map[string]WireRunner      // connID → wire
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -59,7 +60,7 @@ func WithWireBuffer(n int) EngineOption {
 func New(opts ...EngineOption) *Engine {
 	e := &Engine{
 		nodes:      make(map[string]*nodeRunner),
-		wires:      make(map[string]*Wire),
+		wires:      make(map[string]WireRunner),
 		wireBuffer: DefaultWireBuffer,
 		registry:   graph.NewRegistry(),
 	}
@@ -96,8 +97,8 @@ func (e *Engine) Start(ctx context.Context) error {
 	// Safe to mutate outputWires directly here — goroutines haven't started.
 	for _, conn := range g.Connections {
 		w := e.createWire(conn)
-		if nr, ok := e.nodes[conn.FromNode]; ok {
-			nr.outputWires[conn.FromSlot] = append(nr.outputWires[conn.FromSlot], w)
+		if nr, ok := e.nodes[conn.GetFromNode()]; ok {
+			nr.outputWires[conn.GetFromSlot()] = append(nr.outputWires[conn.GetFromSlot()], w)
 		}
 	}
 	g.RUnlock()
@@ -124,7 +125,7 @@ func (e *Engine) Stop() {
 	for _, w := range e.wires {
 		w.Close()
 	}
-	e.wires = make(map[string]*Wire)
+	e.wires = make(map[string]WireRunner)
 	e.nodes = make(map[string]*nodeRunner)
 	e.mu.Unlock()
 }
@@ -174,9 +175,9 @@ func (e *Engine) RemoveNode(ctx context.Context, nodeID string) error {
 	}
 
 	// Collect wires connected to this node.
-	var affectedWires []*Wire
+	var affectedWires []WireRunner
 	for _, w := range e.wires {
-		if w.FromNode == nodeID || w.ToNode == nodeID {
+		if w.GetFromNode() == nodeID || w.GetToNode() == nodeID {
 			affectedWires = append(affectedWires, w)
 		}
 	}
@@ -184,7 +185,7 @@ func (e *Engine) RemoveNode(ctx context.Context, nodeID string) error {
 	// Close all wires first — unblocks wire goroutines and any stuck emit().
 	for _, w := range affectedWires {
 		w.Close()
-		delete(e.wires, w.ConnID)
+		delete(e.wires, w.GetConnID())
 	}
 
 	delete(e.nodes, nodeID)
@@ -196,18 +197,17 @@ func (e *Engine) RemoveNode(ctx context.Context, nodeID string) error {
 
 	// Notify peers about disconnect (non-blocking).
 	for _, w := range affectedWires {
-		peerID := w.ToNode
+		peerID := w.GetToNode()
 		if peerID == nodeID {
-			peerID = w.FromNode
+			peerID = w.GetFromNode()
 		}
-		conn := *w.Conn
 		e.sendControl(peerID, ControlMsg{
 			Kind: CtrlDisconnect,
-			Conn: &conn,
+			Conn: w.GetConn(),
 		})
 		// Remove wire from peer's output list.
-		if w.FromNode != nodeID {
-			e.sendControl(w.FromNode, ControlMsg{Kind: CtrlRemoveWire, Wire: w})
+		if w.GetFromNode() != nodeID {
+			e.sendControl(w.GetFromNode(), ControlMsg{Kind: CtrlRemoveWire, Wire: w})
 		}
 	}
 
@@ -219,19 +219,19 @@ func (e *Engine) RemoveNode(ctx context.Context, nodeID string) error {
 // ---------------------------------------------------------------------------
 
 // AddConnection creates a wire for a connection and notifies both nodes.
-func (e *Engine) AddConnection(ctx context.Context, conn *graph.Connection) error {
+func (e *Engine) AddConnection(ctx context.Context, conn graph.Connection) error {
 	e.mu.Lock()
 	e.createWire(conn)
 	e.mu.Unlock()
 
 	// Notify both endpoints.
-	e.sendControl(conn.FromNode, ControlMsg{
-		Kind: CtrlAddWire, Wire: e.wires[conn.ID],
+	e.sendControl(conn.GetFromNode(), ControlMsg{
+		Kind: CtrlAddWire, Wire: e.wires[conn.GetID()],
 	})
-	e.sendControl(conn.FromNode, ControlMsg{
+	e.sendControl(conn.GetFromNode(), ControlMsg{
 		Kind: CtrlConnect, Conn: conn,
 	})
-	e.sendControl(conn.ToNode, ControlMsg{
+	e.sendControl(conn.GetToNode(), ControlMsg{
 		Kind: CtrlConnect, Conn: conn,
 	})
 
@@ -250,16 +250,15 @@ func (e *Engine) RemoveConnection(ctx context.Context, connID string) error {
 	delete(e.wires, connID)
 
 	// Remove from source node's output list.
-	e.sendControl(w.FromNode, ControlMsg{Kind: CtrlRemoveWire, Wire: w})
+	e.sendControl(w.GetFromNode(), ControlMsg{Kind: CtrlRemoveWire, Wire: w})
 	e.mu.Unlock()
 
 	// Notify both endpoints.
-	conn := *w.Conn
-	e.sendControl(w.FromNode, ControlMsg{
-		Kind: CtrlDisconnect, Conn: &conn,
+	e.sendControl(w.GetFromNode(), ControlMsg{
+		Kind: CtrlDisconnect, Conn: w.GetConn(),
 	})
-	e.sendControl(w.ToNode, ControlMsg{
-		Kind: CtrlDisconnect, Conn: &conn,
+	e.sendControl(w.GetToNode(), ControlMsg{
+		Kind: CtrlDisconnect, Conn: w.GetConn(),
 	})
 
 	return nil
@@ -303,18 +302,38 @@ func (e *Engine) ClickNode(ctx context.Context, nodeID string) (*graph.Node, err
 }
 
 // ConnectNode notifies a node that a connection was made.
-func (e *Engine) ConnectNode(ctx context.Context, nodeID string, conn *graph.Connection) {
+func (e *Engine) ConnectNode(ctx context.Context, nodeID string, conn graph.Connection) {
 	e.sendControl(nodeID, ControlMsg{Kind: CtrlConnect, Conn: conn})
 }
 
 // DisconnectNode notifies a node that a connection was removed.
-func (e *Engine) DisconnectNode(ctx context.Context, nodeID string, conn *graph.Connection) {
+func (e *Engine) DisconnectNode(ctx context.Context, nodeID string, conn graph.Connection) {
 	e.sendControl(nodeID, ControlMsg{Kind: CtrlDisconnect, Conn: conn})
 }
 
 // UpdateNodeConfig pushes config changes to a running node's VM.
 func (e *Engine) UpdateNodeConfig(ctx context.Context, nodeID string, config map[string]string) {
 	e.sendControl(nodeID, ControlMsg{Kind: CtrlUpdateConfig, Config: config})
+}
+
+// updateNodeLabel persists a label change and publishes a node.update event.
+// Called from node runners via callback — safe to call from any goroutine.
+func (e *Engine) updateNodeLabel(nodeID, label string) {
+	ctx := e.ctx
+	g, err := e.store.Load(ctx, e.graphID)
+	if err != nil {
+		return
+	}
+	node := g.Node(nodeID)
+	if node == nil {
+		return
+	}
+	node.Label = label
+	_ = e.store.Save(ctx, e.graphID, g)
+	e.broker.Publish(e.graphID, graph.TypeNodeUpdate, graph.NodeUpdatePayload{
+		Envelope: graph.NewEnvelope(time.Now().UnixMilli()),
+		Node:     node,
+	})
 }
 
 // Sync reconciles the running engine state with the stored graph.
@@ -352,12 +371,12 @@ func (e *Engine) Sync(ctx context.Context) {
 		}
 	}
 
-	var staleWires []*Wire
+	var staleWires []WireRunner
 	for connID, w := range e.wires {
-		conn := g.ConnectionByID(connID)
-		if conn == nil {
+		gConn := g.ConnectionByID(connID)
+		if gConn == nil {
 			staleWires = append(staleWires, w)
-		} else if wireConfigChanged(w, conn) {
+		} else if wireConfigChanged(w, gConn) {
 			// Config changed (e.g. duration updated) — recreate.
 			// Removing from e.wires makes it look "new" in Phase 4.
 			staleWires = append(staleWires, w)
@@ -381,25 +400,25 @@ func (e *Engine) Sync(ctx context.Context) {
 	e.mu.Unlock()
 	for _, w := range staleWires {
 		// Remove wire from source node's output list (via control chan).
-		e.sendControl(w.FromNode, ControlMsg{Kind: CtrlRemoveWire, Wire: w})
+		e.sendControl(w.GetFromNode(), ControlMsg{Kind: CtrlRemoveWire, Wire: w})
 	}
 	e.mu.Lock()
 
 	for _, w := range staleWires {
 		e.broker.Publish(e.graphID, graph.TypeEventCancel, graph.EventCancelPayload{
 			Envelope:  graph.NewEnvelope(0),
-			EventID:   "*:" + w.ConnID,
+			EventID:   "*:" + w.GetConnID(),
 			Immediate: true,
 		})
 		w.Close()
-		delete(e.wires, w.ConnID)
+		delete(e.wires, w.GetConnID())
 	}
 
 	// --- Phase 3: Clean up remaining wires attached to stale nodes ---
 
 	for _, nodeID := range staleNodeIDs {
 		for connID, w := range e.wires {
-			if w.FromNode == nodeID || w.ToNode == nodeID {
+			if w.GetFromNode() == nodeID || w.GetToNode() == nodeID {
 				w.Close()
 				delete(e.wires, connID)
 			}
@@ -424,10 +443,10 @@ func (e *Engine) Sync(ctx context.Context) {
 		}
 	}
 
-	var addConns []*graph.Connection
+	var addConns []graph.Connection
 	for _, conn := range g.Connections {
 		e.mu.RLock()
-		_, exists := e.wires[conn.ID]
+		_, exists := e.wires[conn.GetID()]
 		e.mu.RUnlock()
 		if !exists {
 			addConns = append(addConns, conn)
@@ -461,7 +480,7 @@ func (e *Engine) createNodeRunner(node *graph.Node) error {
 		config = make(map[string]string)
 	}
 
-	nr, err := newNodeRunner(e.ctx, node.ID, e.graphID, nt, config, e.broker)
+	nr, err := newNodeRunner(e.ctx, node.ID, e.graphID, nt, config, e.broker, e.updateNodeLabel)
 	if err != nil {
 		return err
 	}
@@ -472,18 +491,13 @@ func (e *Engine) createNodeRunner(node *graph.Node) error {
 // createWire creates a wire and starts its goroutine. Does NOT register
 // with the source node's outputWires — that must be done separately
 // (directly for initial setup, via CtrlAddWire for runtime changes).
-func (e *Engine) createWire(conn *graph.Connection) *Wire {
-	w := NewWire(conn, e.wireBuffer)
+func (e *Engine) createWire(conn graph.Connection) WireRunner {
+	w := NewWire(conn, e.wireBuffer, e.ctx)
 
-	// Derive wire context from engine context.
-	wCtx, wCancel := context.WithCancel(e.ctx)
-	w.ctx = wCtx
-	w.cancel = wCancel
-
-	e.wires[conn.ID] = w
+	e.wires[conn.GetID()] = w
 
 	// Start the wire goroutine — delivers to target node's input.
-	target := e.getInputChan(conn.ToNode)
+	target := e.getInputChan(conn.GetToNode())
 	if target != nil {
 		e.wg.Go(func() {
 			w.Run(e.graphID, target, e.broker)
@@ -519,17 +533,25 @@ func (e *Engine) getRunner(nodeID string) *nodeRunner {
 }
 
 // wireConfigChanged returns true if the connection's config differs from
-// the running wire's config (e.g. duration was changed).
-func wireConfigChanged(w *Wire, conn *graph.Connection) bool {
-	newDur := 0
-	if conn.Config != nil {
-		if d, ok := conn.Config["duration"]; ok {
-			if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
-				newDur = ms
+// the running wire's config (e.g. duration was changed, or kind changed).
+func wireConfigChanged(w WireRunner, conn graph.Connection) bool {
+	// Kind changed — must recreate.
+	if w.GetConn().Kind() != conn.Kind() {
+		return true
+	}
+	// For event wires, check duration.
+	if ew, ok := w.(*EventWire); ok {
+		newDur := 0
+		if cfg := conn.GetConfig(); cfg != nil {
+			if d, ok := cfg["duration"]; ok {
+				if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
+					newDur = ms
+				}
 			}
 		}
+		return ew.Duration != newDur
 	}
-	return w.Duration != newDur
+	return false
 }
 
 func (e *Engine) sendControl(nodeID string, msg ControlMsg) {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 )
 
@@ -77,16 +78,110 @@ type Node struct {
 	Config   map[string]string `json:"config,omitempty"`
 }
 
+// ConnectionKind distinguishes event-driven connections (discrete messages
+// with optional traversal animation) from state connections (continuous
+// values like coils, registers, and discrete I/O).
+type ConnectionKind string
+
+const (
+	EventKind ConnectionKind = "event"
+	StateKind ConnectionKind = "state"
+)
+
 // Connection is a directed edge from an output slot to an input slot.
-// The optional Config map holds per-connection properties such as
-// "duration" (traversal time in milliseconds for animation).
-type Connection struct {
+// Concrete implementations are [EventConnection] and [StateConnection].
+type Connection interface {
+	GetID() string
+	GetFromNode() string
+	GetFromSlot() string
+	GetToNode() string
+	GetToSlot() string
+	GetConfig() map[string]string
+	Kind() ConnectionKind
+}
+
+// BaseConnection holds fields common to all connection types.
+type BaseConnection struct {
 	ID       string            `json:"id"`
 	FromNode string            `json:"fromNode"`
 	FromSlot string            `json:"fromSlot"`
 	ToNode   string            `json:"toNode"`
 	ToSlot   string            `json:"toSlot"`
 	Config   map[string]string `json:"config,omitempty"`
+}
+
+func (c *BaseConnection) GetID() string                { return c.ID }
+func (c *BaseConnection) GetFromNode() string           { return c.FromNode }
+func (c *BaseConnection) GetFromSlot() string           { return c.FromSlot }
+func (c *BaseConnection) GetToNode() string             { return c.ToNode }
+func (c *BaseConnection) GetToSlot() string             { return c.ToSlot }
+func (c *BaseConnection) GetConfig() map[string]string  { return c.Config }
+
+// EventConnection carries discrete messages with optional traversal animation.
+type EventConnection struct {
+	BaseConnection
+	ConnectionKind ConnectionKind `json:"kind"`
+	Duration       int            `json:"duration,omitempty"`
+}
+
+func (c *EventConnection) Kind() ConnectionKind { return EventKind }
+
+// MarshalJSON ensures the kind field is always "event".
+func (c *EventConnection) MarshalJSON() ([]byte, error) {
+	type Alias EventConnection
+	tmp := (*Alias)(c)
+	tmp.ConnectionKind = EventKind
+	return json.Marshal(tmp)
+}
+
+// StateConnection carries continuous state — a value that "is", not a
+// message that "travels". The wire publishes connection.state SSE events
+// on value change rather than animating a traversal dot.
+type StateConnection struct {
+	BaseConnection
+	ConnectionKind ConnectionKind `json:"kind"`
+	StateDataType  string         `json:"stateDataType,omitempty"` // "bool", "numeric", "string"
+}
+
+func (c *StateConnection) Kind() ConnectionKind { return StateKind }
+
+// MarshalJSON ensures the kind field is always "state".
+func (c *StateConnection) MarshalJSON() ([]byte, error) {
+	type Alias StateConnection
+	tmp := (*Alias)(c)
+	tmp.ConnectionKind = StateKind
+	return json.Marshal(tmp)
+}
+
+// NewEventConnection creates an event connection with the given fields.
+// Duration is extracted from Config["duration"] if present.
+func NewEventConnection(id, fromNode, fromSlot, toNode, toSlot string, config map[string]string) *EventConnection {
+	dur := 0
+	if config != nil {
+		if d, ok := config["duration"]; ok {
+			if ms, err := strconv.Atoi(d); err == nil && ms > 0 {
+				dur = ms
+			}
+		}
+	}
+	return &EventConnection{
+		BaseConnection: BaseConnection{
+			ID: id, FromNode: fromNode, FromSlot: fromSlot,
+			ToNode: toNode, ToSlot: toSlot, Config: config,
+		},
+		Duration: dur,
+	}
+}
+
+// NewStateConnection creates a state connection with the given fields.
+func NewStateConnection(id, fromNode, fromSlot, toNode, toSlot, dataType string, config map[string]string) *StateConnection {
+	return &StateConnection{
+		BaseConnection: BaseConnection{
+			ID: id, FromNode: fromNode, FromSlot: fromSlot,
+			ToNode: toNode, ToSlot: toSlot, Config: config,
+		},
+		StateDataType: dataType,
+	}
 }
 
 // Graph is the top-level container for nodes and connections. It is safe for
@@ -98,7 +193,7 @@ type Graph struct {
 	ID          string            `json:"id"`
 	Version     int64             `json:"version"`
 	Nodes       map[string]*Node  `json:"nodes"`
-	Connections []*Connection     `json:"connections"`
+	Connections []Connection      `json:"-"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
@@ -143,7 +238,7 @@ func (g *Graph) RemoveNode(id string) error {
 	// Remove connections referencing this node.
 	filtered := g.Connections[:0]
 	for _, c := range g.Connections {
-		if c.FromNode != id && c.ToNode != id {
+		if c.GetFromNode() != id && c.GetToNode() != id {
 			filtered = append(filtered, c)
 		}
 	}
@@ -162,27 +257,27 @@ func (g *Graph) Node(id string) *Node {
 // Connect adds a connection to the graph. It validates that the referenced
 // nodes exist but does not validate slot compatibility; use [Validate] with
 // a [Registry] for full validation.
-func (g *Graph) Connect(c *Connection) error {
+func (g *Graph) Connect(c Connection) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	if c == nil {
 		return errors.New("connection is nil")
 	}
-	if c.ID == "" {
+	if c.GetID() == "" {
 		return errors.New("connection ID is empty")
 	}
-	if _, exists := g.Nodes[c.FromNode]; !exists {
-		return fmt.Errorf("source node %q not found", c.FromNode)
+	if _, exists := g.Nodes[c.GetFromNode()]; !exists {
+		return fmt.Errorf("source node %q not found", c.GetFromNode())
 	}
-	if _, exists := g.Nodes[c.ToNode]; !exists {
-		return fmt.Errorf("target node %q not found", c.ToNode)
+	if _, exists := g.Nodes[c.GetToNode()]; !exists {
+		return fmt.Errorf("target node %q not found", c.GetToNode())
 	}
 
 	// Check for duplicate connection ID.
 	for _, existing := range g.Connections {
-		if existing.ID == c.ID {
-			return fmt.Errorf("connection %q already exists", c.ID)
+		if existing.GetID() == c.GetID() {
+			return fmt.Errorf("connection %q already exists", c.GetID())
 		}
 	}
 
@@ -197,7 +292,7 @@ func (g *Graph) Disconnect(id string) error {
 	defer g.mu.Unlock()
 
 	for i, c := range g.Connections {
-		if c.ID == id {
+		if c.GetID() == id {
 			g.Connections = append(g.Connections[:i], g.Connections[i+1:]...)
 			g.Version++
 			return nil
@@ -214,14 +309,99 @@ func (g *Graph) RLock() { g.mu.RLock() }
 func (g *Graph) RUnlock() { g.mu.RUnlock() }
 
 // ConnectionByID returns a connection by ID, or nil if not found.
-func (g *Graph) ConnectionByID(id string) *Connection {
+func (g *Graph) ConnectionByID(id string) Connection {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
 	for _, c := range g.Connections {
-		if c.ID == id {
+		if c.GetID() == id {
 			return c
 		}
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Polymorphic JSON serialization for Graph
+// ---------------------------------------------------------------------------
+
+// graphJSON is the JSON representation of Graph with raw connection blobs.
+type graphJSON struct {
+	ID          string             `json:"id"`
+	Version     int64              `json:"version"`
+	Nodes       map[string]*Node   `json:"nodes"`
+	Connections []json.RawMessage  `json:"connections"`
+	Metadata    map[string]string  `json:"metadata,omitempty"`
+}
+
+// MarshalJSON serializes the graph, encoding each Connection via its
+// concrete type (which includes the "kind" discriminator).
+func (g *Graph) MarshalJSON() ([]byte, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	conns := make([]json.RawMessage, len(g.Connections))
+	for i, c := range g.Connections {
+		raw, err := json.Marshal(c)
+		if err != nil {
+			return nil, fmt.Errorf("marshal connection %d: %w", i, err)
+		}
+		conns[i] = raw
+	}
+	return json.Marshal(graphJSON{
+		ID:          g.ID,
+		Version:     g.Version,
+		Nodes:       g.Nodes,
+		Connections: conns,
+		Metadata:    g.Metadata,
+	})
+}
+
+// UnmarshalJSON deserializes the graph, dispatching each connection to
+// the correct concrete type based on the "kind" field. Connections
+// without a "kind" field default to [EventConnection].
+func (g *Graph) UnmarshalJSON(data []byte) error {
+	var raw graphJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	g.ID = raw.ID
+	g.Version = raw.Version
+	g.Nodes = raw.Nodes
+	g.Metadata = raw.Metadata
+
+	g.Connections = make([]Connection, 0, len(raw.Connections))
+	for i, blob := range raw.Connections {
+		c, err := unmarshalConnection(blob)
+		if err != nil {
+			return fmt.Errorf("connection %d: %w", i, err)
+		}
+		g.Connections = append(g.Connections, c)
+	}
+	return nil
+}
+
+// unmarshalConnection decodes a single connection from JSON, using the
+// "kind" discriminator to pick the concrete type.
+func unmarshalConnection(data json.RawMessage) (Connection, error) {
+	var probe struct {
+		Kind ConnectionKind `json:"kind"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, err
+	}
+	switch probe.Kind {
+	case StateKind:
+		var c StateConnection
+		if err := json.Unmarshal(data, &c); err != nil {
+			return nil, err
+		}
+		return &c, nil
+	default: // "" or "event"
+		var c EventConnection
+		if err := json.Unmarshal(data, &c); err != nil {
+			return nil, err
+		}
+		return &c, nil
+	}
 }

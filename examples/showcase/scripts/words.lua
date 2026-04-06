@@ -22,13 +22,20 @@ local phrases = {
     "Soul of Fire, heart of stone, in pride he conquers forcing the proud to yield.",
 }
 
+function node:update_title()
+    local ms = tonumber(self.config.delay) or 5000
+    self:set_label("Words " .. ms .. "ms")
+end
+
 function node:on_init()
     self.state.idx = 0
     self:init_tick(tonumber(self.config.delay) or 5000)
+    self:update_title()
 end
 
 function node:on_config()
     self:init_tick(tonumber(self.config.delay) or 5000)
+    self:update_title()
 end
 
 function node:on_tick()

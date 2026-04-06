@@ -5,13 +5,20 @@ node:set_content_height(30)
 node:add_output("out", "Output", "string")
 node:define_config("period", "5000", "Period (ms)")
 
+function node:update_title()
+    local ms = tonumber(self.config.period) or 5000
+    self:set_label("Counter " .. ms .. "ms")
+end
+
 function node:on_init()
     self:init_tick(tonumber(self.config.period) or 5000)
     self.state.count = 0
+    self:update_title()
 end
 
 function node:on_config()
     self:init_tick(tonumber(self.config.period) or 5000)
+    self:update_title()
 end
 
 function node:on_tick()

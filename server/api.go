@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -83,10 +84,10 @@ func (s *Server) handleUpdateGraph(w http.ResponseWriter, r *http.Request) {
 
 	// Debug: log connection configs from the saved graph.
 	for _, c := range g.Connections {
-		if len(c.Config) > 0 {
-			fmt.Printf("[api] PUT graph conn %s config=%v\n", c.ID, c.Config)
+		if len(c.GetConfig()) > 0 {
+			fmt.Printf("[api] PUT graph conn %s config=%v\n", c.GetID(), c.GetConfig())
 		} else {
-			fmt.Printf("[api] PUT graph conn %s config=<empty>\n", c.ID)
+			fmt.Printf("[api] PUT graph conn %s config=<empty>\n", c.GetID())
 		}
 	}
 
@@ -227,17 +228,46 @@ func (s *Server) handleAddConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var c graph.Connection
-	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+	// Decode into raw JSON first, then dispatch to the correct concrete type
+	// based on the "kind" field (defaulting to EventConnection).
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read body: "+err.Error())
+		return
+	}
+
+	var probe struct {
+		Kind graph.ConnectionKind `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
-	if c.ID == "" {
+
+	var c graph.Connection
+	switch probe.Kind {
+	case graph.StateKind:
+		var sc graph.StateConnection
+		if err := json.Unmarshal(raw, &sc); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		c = &sc
+	default: // "" or "event"
+		var ec graph.EventConnection
+		if err := json.Unmarshal(raw, &ec); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		c = &ec
+	}
+
+	if c.GetID() == "" {
 		writeError(w, http.StatusBadRequest, "connection ID is required")
 		return
 	}
 
-	if err := g.Connect(&c); err != nil {
+	if err := g.Connect(c); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
@@ -248,14 +278,14 @@ func (s *Server) handleAddConnection(w http.ResponseWriter, r *http.Request) {
 
 	s.broker.publish(graphID, graph.TypeConnectionUpdate, graph.ConnectionUpdatePayload{
 		Envelope:   graph.NewEnvelope(timeNowMilli()),
-		Connection: &c,
+		Connection: c,
 	})
 
 	if s.engine != nil {
-		s.engine.AddConnection(r.Context(), &c)
+		s.engine.AddConnection(r.Context(), c)
 	}
 
-	writeJSON(w, http.StatusCreated, &c)
+	writeJSON(w, http.StatusCreated, c)
 }
 
 // handleRemoveConnection removes a connection and its wire.

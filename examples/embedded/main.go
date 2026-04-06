@@ -31,7 +31,7 @@ func main() {
 	g := graph.NewGraph("workflow")
 	g.AddNode(&graph.Node{ID: "a", Type: "process", Label: "Step A", Position: graph.Position{X: 150, Y: 200}})
 	g.AddNode(&graph.Node{ID: "b", Type: "process", Label: "Step B", Position: graph.Position{X: 450, Y: 200}})
-	g.Connect(&graph.Connection{ID: "ab", FromNode: "a", FromSlot: "out", ToNode: "b", ToSlot: "in"})
+	g.Connect(graph.NewEventConnection("ab", "a", "out", "b", "in", nil))
 	st.Save(context.Background(), g.ID, g)
 
 	// Create the graph server mounted at /graph.

@@ -2,18 +2,27 @@
 node:set_label("Switch")
 node:set_category("transform")
 node:set_content_height(30)
-node:add_input("in", "Input", "string")
-node:add_output("on", "On", "string")
-node:add_output("off", "Off", "string")
+node:add_input("en", "Enable", "state")
+node:add_input("in", "Data", "any")
+node:add_output("out", "Output", "any")
+node:add_output("discard", "Discard", "any")
+
+function node:update_display()
+    local enabled = self.inputs.en == "1" or self.inputs.en == "true" or self.inputs.en == "on"
+    self:display(enabled and "OPEN" or "CLOSED")
+end
+
+function node:on_change(e)
+    self:update_display()
+end
 
 function node:on_event(e)
-    local signal = e.value or self.inputs["in"] or ""
-    local is_on = signal == "1" or signal == "true" or signal == "on"
-    if is_on then
-        self:emit("on", signal)
-        self:display("-> ON")
+    local enabled = self.inputs.en == "1" or self.inputs.en == "true" or self.inputs.en == "on"
+    local val = e.value or self.inputs["in"]
+    if enabled then
+        self:emit("out", val)
     else
-        self:emit("off", signal)
-        self:display("-> OFF")
+        self:emit("discard", val)
     end
+    self:update_display()
 end

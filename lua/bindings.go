@@ -17,10 +17,12 @@ import (
 // called directly from Lua during handler execution.
 type NodeCallbacks struct {
 	Emit         func(slot string, value any)                // send value on output slot
+	Set          func(slot string, value any)                // set state output (with change detection)
 	Display      func(slotName string, slot graph.ContentSlot) // set display content in named slot
 	Glow         func(durationMs int)         // trigger glow animation
 	Log          func(msg string)             // log with node ID prefix
 	SetConfig    func(key, value string)      // update config (persisted)
+	SetLabel     func(label string)           // update node label at runtime
 	InitTick     func(ms int)                 // start periodic tick
 	ScheduleTick func(ms int)                 // schedule one-shot tick (0=immediate)
 }
@@ -122,7 +124,7 @@ func CallHandler(v *vm.VM, nodeTbl *vm.Table, name string, eventTbl *vm.Table) e
 //	e.value       — any or nil
 //	e.source      — string or nil
 //	e.connection  — Connection table or nil
-func BuildEventTable(eventType string, slot string, value any, source string, conn *graph.Connection) *vm.Table {
+func BuildEventTable(eventType string, slot string, value any, source string, conn graph.Connection) *vm.Table {
 	e := vm.NewEmptyTable()
 	e.SetString("type", vm.NewString(eventType))
 
@@ -164,11 +166,28 @@ func BuildEventTable(eventType string, slot string, value any, source string, co
 
 // BuildConnectEventTable creates the event table passed to on_connect(e)
 // and on_disconnect(e). Contains e.connection with the connection details.
-func BuildConnectEventTable(conn *graph.Connection) *vm.Table {
+func BuildConnectEventTable(conn graph.Connection) *vm.Table {
 	e := vm.NewEmptyTable()
 	if conn != nil {
 		e.SetString("connection", vm.NewTable(BuildConnectionBinding(conn)))
 	}
+	return e
+}
+
+// BuildChangeEventTable creates the event table passed to on_change(e),
+// on_high(e), and on_low(e) state handlers.
+//
+//	e.slot   — input slot name
+//	e.value  — new value
+//	e.prev   — previous value
+//	e.source — source node ID
+func BuildChangeEventTable(slot string, value, prev any, source string) *vm.Table {
+	e := vm.NewEmptyTable()
+	e.SetString("type", vm.NewString("change"))
+	e.SetString("slot", vm.NewString(slot))
+	e.SetString("value", GoToLuaValue(value))
+	e.SetString("prev", GoToLuaValue(prev))
+	e.SetString("source", vm.NewString(source))
 	return e
 }
 
@@ -203,6 +222,17 @@ func buildPersistentNodeBinding(
 			panic(&vm.LuaError{Value: vm.NewString("emit: slot name must be a string")})
 		}
 		cb.Emit(slot.AsString(), LuaToGoValue(val))
+		return 0
+	}))
+
+	// --- set (state output) ---
+	node.SetString("set", vm.NewNativeFunc(func(v *vm.VM) int {
+		slot := v.Get(2)
+		val := v.Get(3)
+		if !slot.IsString() {
+			panic(&vm.LuaError{Value: vm.NewString("set: slot name must be a string")})
+		}
+		cb.Set(slot.AsString(), LuaToGoValue(val))
 		return 0
 	}))
 
@@ -308,9 +338,17 @@ func buildPersistentNodeBinding(
 		return 0
 	}))
 
+	// --- set_label (works at runtime) ---
+	node.SetString("set_label", vm.NewNativeFunc(func(v *vm.VM) int {
+		arg := v.Get(2)
+		if arg.IsString() {
+			cb.SetLabel(arg.AsString())
+		}
+		return 0
+	}))
+
 	// --- Type definition methods (noops at runtime) ---
 	noop := vm.NewNativeFunc(func(v *vm.VM) int { return 0 })
-	node.SetString("set_label", noop)
 	node.SetString("set_category", noop)
 	node.SetString("set_content_height", noop)
 	node.SetString("set_interactive", noop)
@@ -360,23 +398,24 @@ func parseContentSlotOpts(t vm.LuaTable, text string) graph.ContentSlot {
 }
 
 // BuildConnectionBinding creates a Lua table representing a connection.
-func BuildConnectionBinding(c *graph.Connection) *vm.Table {
+func BuildConnectionBinding(c graph.Connection) *vm.Table {
 	tbl := vm.NewEmptyTable()
-	tbl.SetString("id", vm.NewString(c.ID))
-	tbl.SetString("from_node", vm.NewString(c.FromNode))
-	tbl.SetString("from_slot", vm.NewString(c.FromSlot))
-	tbl.SetString("to_node", vm.NewString(c.ToNode))
-	tbl.SetString("to_slot", vm.NewString(c.ToSlot))
+	tbl.SetString("id", vm.NewString(c.GetID()))
+	tbl.SetString("from_node", vm.NewString(c.GetFromNode()))
+	tbl.SetString("from_slot", vm.NewString(c.GetFromSlot()))
+	tbl.SetString("to_node", vm.NewString(c.GetToNode()))
+	tbl.SetString("to_slot", vm.NewString(c.GetToSlot()))
 
+	cfg := c.GetConfig()
 	cfgTbl := vm.NewEmptyTable()
-	for k, val := range c.Config {
+	for k, val := range cfg {
 		cfgTbl.SetString(k, vm.NewString(val))
 	}
 	tbl.SetString("config", vm.NewTable(cfgTbl))
 
 	var dur int64
-	if c.Config != nil {
-		if d, ok := c.Config["duration"]; ok {
+	if cfg != nil {
+		if d, ok := cfg["duration"]; ok {
 			if ms, err := strconv.ParseInt(d, 10, 64); err == nil && ms > 0 {
 				dur = ms
 			}

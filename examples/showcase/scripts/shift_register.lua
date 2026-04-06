@@ -14,6 +14,20 @@ node:add_output("b7", "Bit 7", "string")
 node:define_config("bits", "8", "bits")
 node:define_config("speed", "500", "Speed (ms)")
 
+function node:update_title()
+    local bits = tonumber(self.config.bits) or 8
+    local speed = tonumber(self.config.speed) or 500
+    self:set_label("ShiftReg " .. bits .. "b@" .. speed .. "ms")
+end
+
+function node:on_init()
+    self:update_title()
+end
+
+function node:on_config()
+    self:update_title()
+end
+
 function node:on_event(e)
     local bits = tonumber(self.config.bits) or 8
     local speed = tonumber(self.config.speed) or 500

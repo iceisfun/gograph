@@ -2,18 +2,18 @@
 node:set_label("XOR")
 node:set_category("logic")
 node:set_content_height(30)
-node:add_input("a", "A", "string")
-node:add_input("b", "B", "string")
-node:add_output("out", "Output", "string")
+node:add_input("a", "A", "state")
+node:add_input("b", "B", "state")
+node:add_output("out", "Output", "state")
 
 local function truthy(v)
     return v == "1" or v == "true" or v == "on"
 end
 
-function node:on_event(e)
+function node:on_change(e)
     local a = truthy(self.inputs.a)
     local b = truthy(self.inputs.b)
     local r = (a and not b) or (not a and b)
-    self:emit("out", r and "1" or "0")
+    self:set("out", r and "1" or "0")
     self:display(r and "1" or "0")
 end
