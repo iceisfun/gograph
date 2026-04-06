@@ -35,48 +35,70 @@ go run ./examples/basic
 
 ## Embedding in Your Application
 
+The simplest way to embed GoGraph in an existing application is with
+`gograph.Mount()`, which wires up the server, frontend, and route prefix
+in a single call:
+
 ```go
-package main
-
-import (
-    "log"
-
-    "github.com/iceisfun/gograph/frontend"
-    "github.com/iceisfun/gograph/graph"
-    "github.com/iceisfun/gograph/server"
-    "github.com/iceisfun/gograph/store"
-)
-
-func main() {
-    reg := graph.NewRegistry()
-    reg.Register(graph.NodeType{
-        Name:  "echo",
-        Label: "Echo",
-        Slots: []graph.Slot{
-            {ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
-            {ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
-        },
-        Script: `return { out = inputs["in"] }`,
-    })
-
-    srv := server.New(
-        server.WithStaticFS(frontend.FS()),
-        server.WithRegistry(reg),
-        server.WithStore(store.NewMemoryStore()),
-    )
-    log.Fatal(srv.ListenAndServe(":8080"))
-}
+mux := http.NewServeMux()
+srv := gograph.Mount(mux, "/graph", gograph.MountOptions{
+    Store:    store.NewMemoryStore(),
+    Registry: myRegistry,
+})
+// srv is a *server.Server — attach an engine, customize further, etc.
+srv.SetEngine(eng)
+log.Fatal(http.ListenAndServe(":8080", mux))
 ```
 
-Mount at a sub-path within an existing application:
+`MountOptions.StaticFS` defaults to the embedded frontend. The `/config`
+endpoint returns `{"apiBase": "/graph/api", "mode": "edit"}` so the
+frontend discovers its API root automatically.
+
+The lower-level `server.New()` pattern still works if you need full control:
 
 ```go
-graphServer := server.New(
+srv := server.New(
     server.WithStaticFS(frontend.FS()),
-    server.WithRoutePrefix("/graph"),
+    server.WithRegistry(reg),
+    server.WithStore(store.NewMemoryStore()),
 )
-mux.Handle("/graph/", graphServer.Handler())
+log.Fatal(srv.ListenAndServe(":8080"))
 ```
+
+### Frontend Integration
+
+The embedded frontend exports a `GoGraph` class that can mount the graph
+editor into any DOM element.
+
+**Data attributes (zero JS):**
+
+```html
+<div data-gograph data-graph-id="my-graph" data-api="/graph/api"
+     style="width:800px;height:600px"></div>
+<script type="module" src="/graph/assets/gograph.js"></script>
+```
+
+**Programmatic init:**
+
+```html
+<div id="editor" style="width:100%;height:600px"></div>
+<script type="module">
+import { GoGraph } from '/graph/assets/gograph.js';
+// or use the window.GoGraph global
+
+const g = await GoGraph.create(document.getElementById('editor'), {
+    graphId:  'my-graph',
+    apiBase:  '/graph/api',
+    readOnly: false,
+    darkMode: true,
+});
+
+// Later: g.destroy() to clean up
+</script>
+```
+
+If no `data-gograph` elements are found, the frontend falls back to the
+`#graph-canvas` parent for backward compatibility.
 
 ## Lua Node Scripting
 

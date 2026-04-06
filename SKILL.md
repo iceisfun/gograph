@@ -34,7 +34,8 @@ SKILLS:
 - Display slot types: text (default styled text), progress (bar 0..1), led (indicator circles), spinner (rotating arc), badge (colored pill), sparkline (inline chart), image (data URI), svg (blob URL). Content state is cached on Node.Content and seeded to new SSE clients on connect.
 - Lua state: self.inputs, self.config, self.state (persistent across handler calls), self.incoming, self.outgoing.
 - REST API at /api/graphs/{id}/... for CRUD. SSE at /api/graphs/{id}/events for real-time updates.
-- Embeddable via server.WithRoutePrefix("/graph"). Embedded frontend via server.WithStaticFS(frontend.FS()).
+- Embeddable via gograph.Mount(mux, "/graph", MountOptions{Store, Registry, StaticFS}) convenience or lower-level server.WithRoutePrefix("/graph") + server.WithStaticFS(frontend.FS()).
+- Frontend GoGraph class: GoGraph.create(element, {graphId?, apiBase?, readOnly?, darkMode?, theme?}). Data attribute auto-init: <div data-gograph data-graph-id="x" data-api="/graph/api">. window.GoGraph global. destroy() for cleanup.
 - Packages: graph/ (core types, Connection interface, Registry, SSE events), engine/ (goroutine-per-node, WireRunner), lua/ (sandboxed Lua scripting), server/ (HTTP, REST, SSE), store/ (MemoryStore, JSONStore), frontend/ (embedded TS canvas renderer).
 ```
 
@@ -196,21 +197,27 @@ self.outgoing  -- outgoing connections
 
 ### Setting Up the Server
 
+The recommended approach is `gograph.Mount()`, which attaches the server and
+embedded frontend to an existing mux:
+
 ```go
-package main
+mux := http.NewServeMux()
+srv := gograph.Mount(mux, "/graph", gograph.MountOptions{
+    Store:    store.NewMemoryStore(),
+    Registry: reg,
+})
+srv.SetEngine(eng)
+http.ListenAndServe(":8080", mux)
+```
 
-import (
-    "github.com/iceisfun/gograph/frontend"
-    "github.com/iceisfun/gograph/server"
+The lower-level `server.New()` pattern is still available:
+
+```go
+srv := server.New(
+    server.WithRoutePrefix("/graph"),
+    server.WithStaticFS(frontend.FS()),
 )
-
-func main() {
-    srv := server.New(
-        server.WithRoutePrefix("/graph"),
-        server.WithStaticFS(frontend.FS()),
-    )
-    srv.ListenAndServe(":8080")
-}
+srv.ListenAndServe(":8080")
 ```
 
 ### REST API
@@ -225,6 +232,35 @@ func main() {
 
 - `GET /api/graphs/{id}/events` — real-time event stream
 - Events include `connection.state` for state connection updates
+
+### Frontend Integration
+
+The embedded frontend exports a `GoGraph` class for mounting the editor into
+any DOM element.
+
+**Data attribute auto-init (zero JS):**
+
+```html
+<div data-gograph data-graph-id="x" data-api="/graph/api"></div>
+<script type="module" src="/graph/assets/gograph.js"></script>
+```
+
+**Programmatic init:**
+
+```js
+import { GoGraph } from '/graph/assets/gograph.js';
+const g = await GoGraph.create(element, {
+    graphId: 'my-graph',
+    apiBase: '/graph/api',
+    readOnly: false,
+    darkMode: true,
+    theme: { /* partial Theme overrides */ },
+});
+g.destroy(); // cleanup
+```
+
+`window.GoGraph` is also available as a global for `<script type="module">` usage.
+Falls back to `#graph-canvas` parent if no `data-gograph` elements exist.
 
 ## Complete Lua Node Example
 

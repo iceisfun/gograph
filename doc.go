@@ -26,23 +26,16 @@
 //
 // # Quick Start
 //
-//	reg := graph.NewRegistry()
-//	reg.Register(graph.NodeType{
-//	    Name:  "echo",
-//	    Label: "Echo",
-//	    Slots: []graph.Slot{
-//	        {ID: "in", Name: "Input", Direction: graph.Input, DataType: "any"},
-//	        {ID: "out", Name: "Output", Direction: graph.Output, DataType: "any"},
-//	    },
-//	    Script: `return { out = inputs["in"] }`,
+//	mux := http.NewServeMux()
+//	srv := gograph.Mount(mux, "/graph", gograph.MountOptions{
+//	    Store:    store.NewMemoryStore(),
+//	    Registry: reg,
 //	})
+//	srv.SetEngine(eng)
+//	log.Fatal(http.ListenAndServe(":8080", mux))
 //
-//	srv := server.New(
-//	    server.WithStaticFS(frontend.FS()),
-//	    server.WithRegistry(reg),
-//	    server.WithStore(store.NewMemoryStore()),
-//	)
-//	log.Fatal(srv.ListenAndServe(":8080"))
+// [Mount] attaches the server and embedded frontend to an existing mux.
+// The lower-level [server.New] pattern is still available for full control.
 //
 // # Extension Points
 //
@@ -53,5 +46,7 @@
 //
 // The frontend is fully themeable. The server accepts any [fs.FS] via
 // [server.WithStaticFS], allowing custom frontends or development-mode
-// file serving.
+// file serving. The frontend exports a GoGraph class for programmatic
+// mounting into any DOM element, with data attribute auto-init support
+// and a destroy() method for cleanup.
 package gograph
