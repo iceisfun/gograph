@@ -31,7 +31,7 @@ SKILLS:
 - Lua state handlers: on_change(e) with e.value/e.prev/e.slot/e.source, on_high(e), on_low(e).
 - Lua methods: self:emit(slot, val), self:set(slot, val), self:display(text) or self:display(slotName, text, opts) or self:display(slotName, opts), self:glow(ms), self:set_config(k,v), self:set_label(label), self:log(msg), self:init_tick(ms), self:schedule_tick(ms).
 - ContentSlot is an interface with 8 concrete types: TextSlot, ProgressSlot, LedSlot, SpinnerSlot, BadgeSlot, SparklineSlot, ImageSlot, SvgSlot. All share BaseSlot (Type, Color, Animate, Duration). Polymorphic JSON with "type" discriminator.
-- Display slot types: text (default styled text), progress (bar 0..1), led (indicator circles), spinner (rotating arc), badge (colored pill), sparkline (inline chart), image (data URI), svg (blob URL).
+- Display slot types: text (default styled text), progress (bar 0..1), led (indicator circles), spinner (rotating arc), badge (colored pill), sparkline (inline chart), image (data URI), svg (blob URL). Content state is cached on Node.Content and seeded to new SSE clients on connect.
 - Lua state: self.inputs, self.config, self.state (persistent across handler calls), self.incoming, self.outgoing.
 - REST API at /api/graphs/{id}/... for CRUD. SSE at /api/graphs/{id}/events for real-time updates.
 - Embeddable via server.WithRoutePrefix("/graph"). Embedded frontend via server.WithStaticFS(frontend.FS()).

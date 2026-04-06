@@ -123,6 +123,11 @@ The `display()` method supports 8 visual slot types via the
 `ContentSlot` interface. Each type has its own canvas renderer and
 fields. The `type` field in the opts table selects the concrete type.
 
+**Content seeding**: Display state is cached on `Node.Content` at
+runtime. When a new browser connects via SSE, the engine injects current
+content into the graph snapshot so the client sees the current visual
+state immediately — no need to wait for the next tick/event cycle.
+
 ### text (default)
 
 Styled text. Used when calling `display(text)` or `display(name, text, opts)`.

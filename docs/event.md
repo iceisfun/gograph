@@ -288,7 +288,11 @@ API modifies the node, etc.
 
 ### graph.update
 
-Emitted when the full graph state changes via the REST API.
+Emitted when the full graph state changes via the REST API. Also sent
+on SSE connect with the full graph snapshot. The engine injects current
+`Node.Content` (display slot state) into the snapshot so new clients
+see the current visual state immediately without waiting for Lua
+handlers to fire again.
 
 ## Event Flow
 
