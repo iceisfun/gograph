@@ -51,6 +51,23 @@ function drawRoundedRect(
     ctx.closePath();
 }
 
+/**
+ * Generate deterministic category colors from a category name string.
+ * Uses the string hash to pick a hue, then builds dark-themed fill/stroke/titleBar.
+ */
+function generateCategoryColors(category: string): { fill: string; stroke: string; titleBar: string } {
+    let hash = 0;
+    for (let i = 0; i < category.length; i++) {
+        hash = ((hash << 5) - hash + category.charCodeAt(i)) | 0;
+    }
+    const hue = ((hash % 360) + 360) % 360;
+    return {
+        fill: `hsl(${hue}, 30%, 15%)`,
+        stroke: `hsl(${hue}, 45%, 30%)`,
+        titleBar: `hsl(${hue}, 35%, 18%)`,
+    };
+}
+
 // Module-level image cache for ImageSlot
 const imageCache: Map<string, HTMLImageElement> = new Map();
 
@@ -416,9 +433,13 @@ export function drawNodes(
         const isSelected = store.interaction.selectedNodes.has(node.id);
         const isHovered = store.interaction.hoveredNode === node.id;
 
-        // Resolve category colors
+        // Resolve category colors (auto-generate for unknown categories)
         const category = nodeType?.category;
-        const catColors = category ? theme.nodeCategories[category] : undefined;
+        let catColors = category ? theme.nodeCategories[category] : undefined;
+        if (!catColors && category) {
+            catColors = generateCategoryColors(category);
+            theme.nodeCategories[category] = catColors; // cache for next frame
+        }
         const nodeFill = catColors?.fill ?? theme.nodeFill;
         const nodeStroke = catColors?.stroke ?? theme.nodeStroke;
         const nodeTitleBar = catColors?.titleBar ?? theme.nodeTitleBar;

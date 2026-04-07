@@ -20,27 +20,36 @@ node:set_label("My Sensor")
 
 ### node:set_category(category)
 
-Sets the category. The frontend uses category to pick **node colors** —
-each category gets its own fill, stroke, and title bar color from the
-theme.
+Sets the category string. The frontend uses this to pick **node colors**
+— each unique category gets its own fill, stroke, and title bar color.
 
 ```lua
-node:set_category("source")
+node:set_category("sensor")
+node:set_category("actuator")
+node:set_category("transform")
 ```
 
-Built-in theme categories and their colors:
+Categories are arbitrary strings. Use whatever makes sense for your
+domain. The default theme includes five categories (`source`,
+`transform`, `output`, `delay`, `logic`) with predefined colors, but
+**any string works** — unknown categories get auto-generated colors
+derived from the category name.
 
-| Category | Fill | Stroke | Use for |
-|----------|------|--------|---------|
-| `source` | dark green | `#0f6040` | Data generators, oscillators, timers |
-| `transform` | dark purple | `#5f3460` | String ops, math, filters |
-| `output` | dark orange | `#b05020` | Displays, sinks, printers |
-| `delay` | dark yellow | `#a09020` | Delays, rate limiters, queues |
-| `logic` | dark blue | `#3060a0` | AND/OR/XOR, gates, switches |
+To customize colors, pass `nodeCategories` in the theme options:
 
-Nodes with an unrecognized category use the default theme colors. You
-can define custom categories — they just need a matching entry in the
-theme's `nodeCategories` map.
+```javascript
+GoGraph.create(element, {
+    theme: {
+        nodeCategories: {
+            sensor:   { fill: '#1a3a2e', stroke: '#0f6040', titleBar: '#1a4a3e' },
+            actuator: { fill: '#3e1a1a', stroke: '#a03030', titleBar: '#4e1a1a' },
+        }
+    }
+});
+```
+
+This merges with the defaults — existing categories are preserved unless
+you explicitly override them.
 
 ### node:set_content_height(pixels)
 

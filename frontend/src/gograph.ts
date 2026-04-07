@@ -87,10 +87,17 @@ export class GoGraph {
             }
         }
 
-        // 6. Build theme
+        // 6. Build theme (deep merge nodeCategories so users can add/override)
         const theme: Theme = options.theme
-            ? { ...defaultTheme, ...options.theme }
-            : defaultTheme;
+            ? {
+                ...defaultTheme,
+                ...options.theme,
+                nodeCategories: {
+                    ...defaultTheme.nodeCategories,
+                    ...(options.theme.nodeCategories || {}),
+                },
+            }
+            : { ...defaultTheme };
 
         // 7. Create renderer and handler
         const renderer = new Renderer(canvas, store, theme);
